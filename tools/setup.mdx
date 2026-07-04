@@ -1,7 +1,7 @@
 ---
 title: "Setup and Diagnostics Tools Reference"
 sidebarTitle: "Setup & Diagnostics"
-description: "Reference for apex-mcp setup and diagnostic tools: setup guide, requirements check, permissions check and fix, health check, template refresh, and audit log."
+description: "Reference for apex-mcp setup and diagnostic tools: setup guide, requirements check, permissions check and fix, health check, and template refresh."
 ---
 
 The setup and diagnostics tools are your first stop when configuring a new apex-mcp installation, troubleshooting connection problems, or verifying that Oracle permissions are correctly granted. They do not create APEX components — instead, they inspect the environment, report problems with actionable remediation steps, and apply automated fixes where possible. Use them before starting development on a new APEX instance, or any time something unexpected happens.
@@ -88,7 +88,7 @@ This tool takes no parameters. Requires an active database connection.
 - **APEX packages** (`EXECUTE`): `APEX_UTIL`, `WWV_FLOW_IMP`, `WWV_FLOW_IMP_SHARED`, `WWV_IMP_WORKSPACE`, `WWV_FLOW_IMP_PAGE`
 - **Internal tables** (`SELECT` / `UPDATE` / `DELETE`): `WWV_FLOW_PAGE_PLUGS`, `WWV_FLOW_STEP_ITEMS`, `WWV_FLOW_STEPS`
 
-**Returns:** JSON with `user`, `dsn`, a `permissions` array (each entry includes `object`, `privilege`, `granted`, and `needed_for`), a `summary` count, and a `grant_script` to run as `ADMIN` or `SYS` if any grants are missing.
+**Returns:** JSON with `user`, `dsn`, a `permissions` array (each entry includes `object`, `privilege`, `granted`, and `needed_for`), a `summary` count, and a `grant_script_if_needed` field containing SQL to run as `ADMIN` or `SYS` if any grants are missing.
 
 ```json
 {
@@ -99,7 +99,7 @@ This tool takes no parameters. Requires an active database connection.
     { "object": "WWV_FLOW_PAGE_PLUGS", "privilege": "SELECT/UPDATE/DELETE", "granted": true, "update_granted": true, "delete_granted": false, "needed_for": "Editing tools" }
   ],
   "summary": "11/12 permissions confirmed",
-  "grant_script": "GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO MY_SCHEMA; ..."
+  "grant_script_if_needed": "GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO MY_SCHEMA; ..."
 }
 ```
 
@@ -112,7 +112,7 @@ apex_check_permissions()
 ```
 
 <Warning>
-  If `EXECUTE` grants on `WWV_FLOW_IMP` and related packages are missing, `apex_create_app` and all component-creation tools will fail. If `UPDATE`/`DELETE` grants on `WWV_FLOW_*` tables are missing, editing tools (`apex_update_region`, `apex_delete_page`, etc.) will fail. Use `apex_fix_permissions` or the returned `grant_script` to resolve.
+  If `EXECUTE` grants on `WWV_FLOW_IMP` and related packages are missing, `apex_create_app` and all component-creation tools will fail. If `UPDATE`/`DELETE` grants on `WWV_FLOW_*` tables are missing, editing tools (`apex_update_region`, `apex_delete_page`, etc.) will fail. Use `apex_fix_permissions` or the SQL in the returned `grant_script_if_needed` field to resolve.
 </Warning>
 
 ---

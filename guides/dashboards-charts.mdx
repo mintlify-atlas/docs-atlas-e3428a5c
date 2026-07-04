@@ -1,5 +1,5 @@
 ---
-title: "Build Dashboards and Add Charts to APEX Pages"
+title: "Build Dashboards and Add Oracle JET Charts to APEX Pages"
 sidebarTitle: "Dashboards & Charts"
 description: "Add Oracle JET charts, metric cards, gauges, and analytics pages to Oracle APEX 24.2 applications using apex-mcp visual and chart tools."
 ---
@@ -75,7 +75,7 @@ Add an Oracle JET chart region to any existing page. Supports all major chart ty
 | `chart_type` | `str` | Chart type (see table below) |
 | `sql_query` | `str` | SQL returning `LABEL` and `VALUE` columns |
 | `series_name` | `str` | Legend label for the data series |
-| `height` | `int` | Chart height in pixels (default `300`) |
+| `height` | `int` | Chart height in pixels (default `400`) |
 | `orientation` | `str` | `"vertical"` (default) or `"horizontal"` |
 | `sequence` | `int` | Region display sequence |
 
@@ -135,7 +135,7 @@ KPI cards with gradient, flat, or outline styling. Each card displays a live cou
 apex_add_metric_cards(
     page_id=1,
     region_name="HR KPIs",
-    style="gradient",          # "gradient" | "flat" | "outline"
+    style="gradient",          # "gradient" | "white" | "dark"
     columns=4,                 # cards per row
     metrics=[
         {"label": "Employees",   "sql": "SELECT COUNT(*) FROM EMPLOYEES",   "icon": "fa-users",     "color": "#1E88E5"},
@@ -198,28 +198,33 @@ SQL must alias category labels as `LABEL` and numeric values as `VALUE`.
 
 ### `apex_add_sparkline` — Sparkline with Trend
 
-A compact inline chart showing a value and a trend line for quick at-a-glance insight. Rendered as HTML/CSS (no JET dependency).
+A compact set of metric cards each showing a live value plus a mini bar sparkline trend chart. Rendered as HTML/CSS (no JET dependency). Each metric is defined as a dict inside a `metrics` list.
 
 ```python
 apex_add_sparkline(
     page_id=1,
     region_name="Monthly Hires",
-    main_sql="SELECT COUNT(*) FROM EMPLOYEES WHERE TRUNC(HIRE_DATE,'MM') = TRUNC(SYSDATE,'MM')",
-    trend_sql="""
-        SELECT COUNT(*) AS VALUE
-          FROM EMPLOYEES
-         WHERE HIRE_DATE >= ADD_MONTHS(SYSDATE,-6)
-         GROUP BY TRUNC(HIRE_DATE,'MM')
-         ORDER BY 1
-    """,
-    label="New Hires This Month",
-    icon="fa-users",
-    color="green",
+    metrics=[
+        {
+            "label": "New Hires This Month",
+            "sql":   "SELECT COUNT(*) FROM EMPLOYEES WHERE TRUNC(HIRE_DATE,'MM') = TRUNC(SYSDATE,'MM')",
+            "trend_sql": """
+                SELECT COUNT(*) AS VALUE
+                  FROM EMPLOYEES
+                 WHERE HIRE_DATE >= ADD_MONTHS(SYSDATE,-6)
+                 GROUP BY TRUNC(HIRE_DATE,'MM')
+                 ORDER BY 1
+            """,
+            "icon":  "fa-users",
+            "color": "green",
+        }
+    ],
+    columns=4,
     sequence=15,
 )
 ```
 
-The `trend_sql` returns up to 7 rows with a `VALUE` column; these values are normalized to a mini bar sparkline inside the card.
+The `trend_sql` for each metric returns up to 7 rows with a `VALUE` column; these values are normalized to a mini bar sparkline inside the card. Each metric dict supports: `label` (required), `sql` (required), `trend_sql`, `icon`, `color` (hex or named), `prefix`, and `suffix`.
 
 ---
 
@@ -232,13 +237,13 @@ apex_add_calendar(
     page_id=71,
     region_name="Hire Date Calendar",
     sql_query="""
-        SELECT hire_date       AS date_col,
-               first_name || ' ' || last_name AS title_col
+        SELECT hire_date                      AS event_date,
+               first_name || ' ' || last_name AS event_title
           FROM employees
          ORDER BY hire_date
     """,
-    date_col="DATE_COL",
-    title_col="TITLE_COL",
+    date_column="EVENT_DATE",
+    title_column="EVENT_TITLE",
     sequence=10,
 )
 ```
@@ -257,13 +262,13 @@ apex-mcp's `chart_tools.py` module provides 10 additional chart types for advanc
 
 | Tool | Required SQL Aliases |
 |------|---------------------|
-| `apex_add_stacked_chart` | `LABEL`, `VALUE` (one series per call) |
+| `apex_add_stacked_chart` | `LABEL`, `VALUE` per series (each series in `series_list` has its own SQL) |
 | `apex_add_combo_chart` | Bar SQL: `LABEL`, `VALUE` · Line SQL: `LABEL`, `VALUE` |
 | `apex_add_pareto_chart` | `LABEL`, `VALUE` (cumulative % computed automatically) |
-| `apex_add_scatter_plot` | `LABEL`, `X_VALUE`, `Y_VALUE` |
-| `apex_add_range_chart` | `LABEL`, `LOW_VALUE`, `HIGH_VALUE` |
-| `apex_add_area_chart` | `LABEL`, `VALUE` (stacked area) |
-| `apex_add_bubble_chart` | `LABEL`, `X_VALUE`, `Y_VALUE`, `Z_VALUE` (bubble size) |
+| `apex_add_scatter_plot` | `LABEL`, `X`, `Y` (defaults; configurable via `x_column`, `y_column`, `label_column`) |
+| `apex_add_range_chart` | `LABEL`, `LOW`, `HIGH` (defaults; configurable via `label_column`, `low_column`, `high_column`) |
+| `apex_add_area_chart` | `LABEL`, `VALUE` |
+| `apex_add_bubble_chart` | `LABEL`, `X`, `Y`, `Z` (defaults; configurable via `label_column`, `x_column`, `y_column`, `z_column`) |
 | `apex_add_gradient_donut` | `LABEL`, `VALUE` |
 | `apex_add_animated_counter` | Single numeric value (no alias required) |
 
@@ -276,7 +281,7 @@ apex_add_stacked_chart(
     page_id=61,
     region_name="Assessments by Status",
     chart_type="bar",    # "bar" or "area"
-    series=[
+    series_list=[
         {"name": "Completed",   "sql": "SELECT dept_id AS LABEL, COUNT(*) AS VALUE FROM assessments WHERE status='DONE'    GROUP BY dept_id ORDER BY 1"},
         {"name": "In Progress", "sql": "SELECT dept_id AS LABEL, COUNT(*) AS VALUE FROM assessments WHERE status='ACTIVE'  GROUP BY dept_id ORDER BY 1"},
         {"name": "Draft",       "sql": "SELECT dept_id AS LABEL, COUNT(*) AS VALUE FROM assessments WHERE status='DRAFT'   GROUP BY dept_id ORDER BY 1"},
@@ -296,8 +301,8 @@ apex_add_combo_chart(
     region_name="Hires vs Avg Salary",
     bar_sql="SELECT TO_CHAR(hire_date,'MM/YYYY') AS LABEL, COUNT(*) AS VALUE FROM employees GROUP BY TO_CHAR(hire_date,'MM/YYYY') ORDER BY 1",
     line_sql="SELECT TO_CHAR(hire_date,'MM/YYYY') AS LABEL, ROUND(AVG(salary),0) AS VALUE FROM employees GROUP BY TO_CHAR(hire_date,'MM/YYYY') ORDER BY 1",
-    bar_series_name="New Hires",
-    line_series_name="Avg Salary",
+    bar_name="New Hires",
+    line_name="Avg Salary",
     height=320,
     sequence=30,
 )
@@ -325,9 +330,9 @@ apex_add_scatter_plot(
     page_id=61,
     region_name="Experience vs Salary",
     sql_query="""
-        SELECT first_name || ' ' || last_name   AS LABEL,
-               MONTHS_BETWEEN(SYSDATE,hire_date) AS X_VALUE,
-               salary                            AS Y_VALUE
+        SELECT first_name || ' ' || last_name    AS LABEL,
+               MONTHS_BETWEEN(SYSDATE,hire_date) AS X,
+               salary                            AS Y
           FROM employees
     """,
     x_axis_title="Months Employed",
@@ -345,9 +350,9 @@ apex_add_range_chart(
     page_id=61,
     region_name="Salary Range by Department",
     sql_query="""
-        SELECT department_name          AS LABEL,
-               MIN(salary)              AS LOW_VALUE,
-               MAX(salary)              AS HIGH_VALUE
+        SELECT department_name AS LABEL,
+               MIN(salary)     AS LOW,
+               MAX(salary)     AS HIGH
           FROM employees e
           JOIN departments d ON d.department_id = e.department_id
          GROUP BY department_name
@@ -367,9 +372,9 @@ apex_add_bubble_chart(
     region_name="Dept: Headcount vs Avg Salary vs Budget",
     sql_query="""
         SELECT d.department_name    AS LABEL,
-               COUNT(e.employee_id) AS X_VALUE,
-               ROUND(AVG(e.salary)) AS Y_VALUE,
-               d.budget             AS Z_VALUE
+               COUNT(e.employee_id) AS X,
+               ROUND(AVG(e.salary)) AS Y,
+               d.budget             AS Z
           FROM departments d
           JOIN employees e ON e.department_id = d.department_id
          GROUP BY d.department_name, d.budget

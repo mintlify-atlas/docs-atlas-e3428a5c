@@ -1,5 +1,5 @@
 ---
-title: "Batch Mode and Dry-Run Mode in apex-mcp"
+title: "apex-mcp Batch Mode and Dry-Run Preview for Oracle PL/SQL"
 sidebarTitle: "Batch & Dry-Run"
 description: "Use batch mode to execute multiple Oracle operations in a single DB round-trip, and dry-run mode to preview all generated PL/SQL without executing it."
 ---
@@ -34,17 +34,20 @@ apex_add_jet_chart(page_id=1, chart_name="Headcount by Dept",
                    sql_query="SELECT dept, COUNT(*) VALUE FROM EMPLOYEES GROUP BY dept")
 
 # All five statements execute in one DB round-trip:
-apex_commit_batch(rollback_on_error=True)
+apex_commit_batch()
 ```
 
-### rollback_on_error
+### Error Handling
 
-The `rollback_on_error` parameter (default: `True`) controls what happens if any statement in the batch fails:
+`apex_commit_batch()` executes all queued statements in order. Each statement result is captured individually — errors on one statement do not abort the remaining queue. The tool returns a JSON object with:
 
-- **`rollback_on_error=True` (default):** If any statement raises an Oracle error, the entire batch is rolled back. No partial changes are committed. The returned log will contain an `ERR:` line for the failing statement and a `ROLLBACK:` summary line.
-- **`rollback_on_error=False`:** All statements that succeed are committed, even if others fail. The log will contain `ERR:` lines for failures and a `COMMIT: partial commit...` summary line.
+- `status`: `"ok"` if all statements succeeded, `"partial"` if any failed.
+- `executed`: total number of statements attempted.
+- `ok`: count of successful statements.
+- `errors`: count of failed statements.
+- `log`: list of per-statement result strings (`"OK: ..."` or `"ERR: ..."`).
 
-Using the default `True` is recommended during app builds — a failed component creation that partially succeeds can leave your app in an inconsistent state.
+Internally, `ConnectionManager.commit_batch()` defaults to `rollback_on_error=True`, meaning the entire batch is rolled back if any statement fails and no partial changes are committed. This default ensures app builds remain in a consistent state on error.
 
 ## Dry-Run Mode
 

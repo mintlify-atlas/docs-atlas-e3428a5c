@@ -172,15 +172,12 @@ No parameters.
 
 Execute all queued batch operations in a single database round-trip, then commit. Each queued PL/SQL block is executed in order. Errors on individual statements are captured and reported but do not abort the remaining queue.
 
-No parameters. Rollback behavior is controlled by the underlying `db.commit_batch()` call:
-
-- **`rollback_on_error=True`** (default): If any statement fails, a full `ROLLBACK` is issued and all batch changes are undone.
-- **`rollback_on_error=False`**: A `COMMIT` is issued even if some statements failed (partial commit).
+No parameters. If any statement fails, a full `ROLLBACK` is issued automatically and all batch changes are undone.
 
 **Returns:** JSON with `status` (`"ok"` or `"partial"`), `executed` (total statements attempted), `ok` (successful count), `errors` (failed count), and `log` (per-statement result strings of the form `"OK: ..."` or `"ERR: ..."`).
 
 <Warning>
-  Once `apex_commit_batch()` is called the queue is cleared regardless of outcome. On error with `rollback_on_error=True`, all changes are rolled back and must be re-queued.
+  Once `apex_commit_batch()` is called the queue is cleared regardless of outcome. On any statement error, all changes are rolled back and must be re-queued.
 </Warning>
 
 ### Batch Mode Example

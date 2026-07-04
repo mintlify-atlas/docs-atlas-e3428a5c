@@ -1,7 +1,7 @@
 ---
-title: "Item Validations and Computations Reference"
+title: "Oracle APEX Item Validations and Computations Reference"
 sidebarTitle: "Validations"
-description: "Reference for apex-mcp validation and computation tools: add server-side item validations (NOT_NULL, REGEX, SQL, PL/SQL) and automatic value computations."
+description: "apex-mcp tools for server-side item validations (NOT_NULL, REGEX, PL/SQL) and automatic value computations on Oracle APEX page items."
 ---
 
 Server-side validations in Oracle APEX run on page submit, before any page processing takes place. When a validation fails, APEX stops execution, displays the error message inline next to the failing field (and in the notification area), and does not execute any page processes. This makes validations the correct place to enforce data integrity rules — not inside the DML process itself. apex-mcp provides two tools in this space: `apex_add_item_validation` to attach rules to individual page items, and `apex_add_item_computation` to derive or pre-populate item values at specific points in the page lifecycle.

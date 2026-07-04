@@ -130,13 +130,13 @@ List all shared Lists of Values (LOVs) for an application with their name, type,
 
 ### `apex_list_auth_schemes`
 
-List all authorization schemes for an application with their name, type, custom function body (for `PLSQL_EXPRESSION` and `PLSQL_FUNCTION_RETURNING_BOOLEAN` types), error message, and caching setting.
+List all authorization schemes for an application with their name, type, PL/SQL expression or function body (stored in `attribute_01` for `PLSQL_EXPRESSION` and `PLSQL_FUNCTION_RETURNING_BOOLEAN` types), error message, and caching setting.
 
 <ParamField path="app_id" type="integer" required>
   Application ID.
 </ParamField>
 
-**Returns:** JSON with `status`, `data`, and `count`.
+**Returns:** JSON with `status`, `data` (array with `authorization_scheme_name`, `authorization_scheme_type`, `attribute_01`, `error_message`, `caching`), and `count`.
 
 ---
 
@@ -419,7 +419,7 @@ Delete an entire page and all its components from an application. Cannot delete 
   Page ID to delete. Must not be `0`.
 </ParamField>
 
-**Returns:** JSON with `status` and `message`.
+**Returns:** JSON with `status`, `app_id`, `page_id`, `page_name`, `message`, and `warning`.
 
 ---
 

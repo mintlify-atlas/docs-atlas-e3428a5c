@@ -1,7 +1,7 @@
 ---
 title: "JavaScript and CSS Tools Reference"
 sidebarTitle: "JavaScript & CSS"
-description: "Reference for apex-mcp JavaScript and CSS tools: add inline page JS, global JS via Page 0, page CSS, global CSS, and generate AJAX callback processes."
+description: "apex-mcp JS and CSS tools: inject page-level JS, generate global JS files for upload, create AJAX callback processes, and add page-scoped or app-wide CSS."
 ---
 
 apex-mcp provides tools to add JavaScript and CSS to APEX pages programmatically, using APEX's built-in code slots and hidden PL/SQL regions that output `<script>` and `<style>` tags via `sys.htp.p()`. This approach integrates cleanly with APEX's rendering pipeline and avoids the need to manually navigate the App Builder UI for each page.
@@ -85,7 +85,7 @@ The generated code is automatically wrapped in an IIFE (`(function() { 'use stri
   Human-readable description included in the file header comment.
 </ParamField>
 
-**Returns:** JSON with `status`, `function_name`, `filename`, `description`, `js_content` (prepared code ready to upload), `upload_instructions` (step-by-step list), and `reference_url` (e.g. `#APP_FILES#app-utils.js`).
+**Returns:** JSON with `status`, `function_name`, `filename`, `description`, `js_content` (prepared code ready to upload), `upload_instructions` (step-by-step list), `reference_url` (e.g. `#APP_FILES#app-utils.js`), and `note`.
 
 <Note>
   **Quick alternative:** Call `apex_add_page_js(page_id=0, javascript_code=...)` to add JavaScript directly to the Global Page (Page 0). This is simpler but slightly less efficient than a static file because the code is rendered server-side on every request rather than cached by the browser.

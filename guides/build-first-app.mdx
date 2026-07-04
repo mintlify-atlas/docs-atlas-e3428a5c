@@ -1,7 +1,7 @@
 ---
-title: "Build Your First Oracle APEX App with apex-mcp"
+title: "Build Your First Oracle APEX 24.2 App with apex-mcp"
 sidebarTitle: "First App"
-description: "Step-by-step guide to building a complete Oracle APEX application using apex-mcp tools: connect, create, add pages, generate CRUD, add navigation, and finalize."
+description: "Step-by-step guide to building a complete Oracle APEX 24.2 app with apex-mcp: connect to Oracle, create pages, generate CRUD, add navigation, and finalize."
 ---
 
 This guide walks through building a complete APEX application from scratch using apex-mcp's incremental build approach. Each step calls a single tool, and the session singleton tracks all created components so every subsequent call knows exactly what exists — no manual ID bookkeeping required.
@@ -134,9 +134,9 @@ Before starting, ensure you have:
     Add navigation menu entries so users can reach every page from the APEX navigation bar.
 
     ```python
-    apex_add_nav_item("Dashboard",    app_id=200, page_id=1,  icon="fa-home")
-    apex_add_nav_item("Employees",    app_id=200, page_id=10, icon="fa-users")
-    apex_add_nav_item("Departments",  app_id=200, page_id=20, icon="fa-building")
+    apex_add_nav_item("Dashboard",   target_page=1,  sequence=10, icon="fa-home")
+    apex_add_nav_item("Employees",   target_page=10, sequence=20, icon="fa-users")
+    apex_add_nav_item("Departments", target_page=20, sequence=30, icon="fa-building")
     ```
 
     Each call appends an entry to the application's navigation list. The `icon` parameter accepts any Font Awesome class name (prefixed with `fa-`).
@@ -194,7 +194,7 @@ Before starting, ensure you have:
 
 Once finalized and validated, navigate to your APEX instance and open the app using the URL pattern:
 
-```
+```text
 https://<your-apex-base-url>/ords/f?p=200
 ```
 

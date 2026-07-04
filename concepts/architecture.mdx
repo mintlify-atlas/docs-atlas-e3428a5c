@@ -1,7 +1,7 @@
 ---
-title: "apex-mcp Architecture: FastMCP, Oracle, and APEX"
+title: "apex-mcp Architecture: FastMCP, Oracle ADB, and APEX"
 sidebarTitle: "Architecture"
-description: "How apex-mcp connects AI clients to Oracle APEX 24.2 via FastMCP 3.x, oracledb thin driver, and the wwv_flow_imp_page PL/SQL API."
+description: "How apex-mcp connects AI clients to Oracle APEX 24.2 via FastMCP 3.x, the oracledb thin driver, and the wwv_flow_imp_page PL/SQL API."
 ---
 
 apex-mcp acts as a bridge between AI clients and Oracle APEX 24.2, using FastMCP 3.x as the MCP framework. Instead of navigating the APEX App Builder UI, you describe what you want to an AI assistant, and apex-mcp translates those requests into direct PL/SQL calls against Oracle Autonomous Database — creating real, production-quality APEX applications in seconds.
@@ -123,6 +123,23 @@ apex-mcp provides five workflow templates via MCP prompts. Prompts return step-b
 | `create_full_app_from_schema` | _(none)_ | Auto-generate a complete app from all schema tables |
 | `inspect_existing_app` | `app_id` | Thorough inspection of an existing app with recommendations |
 | `add_rest_api` | `table_name` | Expose a table as ORDS REST endpoints (GET/POST/PUT/DELETE) |
+
+## Tool Annotations
+
+Every tool registered in `server.py` carries a set of MCP tool annotations that describe its behavior to AI clients. Clients use these hints to decide when to auto-approve a tool call versus request user confirmation.
+
+| Annotation key | `_READ` | `_READ_OPEN` | `_SAFE` | `_WRITE` | `_DELETE` |
+|---|---|---|---|---|---|
+| `readOnlyHint` | `True` | `True` | `False` | `False` | `False` |
+| `destructiveHint` | `False` | `False` | `False` | `False` | `True` |
+| `idempotentHint` | `True` | `True` | `True` | `False` | `False` |
+| `openWorldHint` | `False` | `True` | `False` | `False` | `False` |
+
+- **`_READ`** — safe read operations that return deterministic results (e.g., `apex_list_apps`, `apex_get_app_details`).
+- **`_READ_OPEN`** — read operations whose results depend on live database state (e.g., `apex_run_sql` — query results vary with DB content).
+- **`_SAFE`** — write operations that are idempotent and safe to retry (e.g., `apex_connect`, `apex_fix_permissions`, `apex_begin_batch`).
+- **`_WRITE`** — operations that create or modify resources and are not idempotent (e.g., `apex_add_region`, `apex_generate_crud`).
+- **`_DELETE`** — destructive operations that permanently remove resources (e.g., `apex_delete_app`, `apex_delete_page`).
 
 <Note>
 **Single-user constraint:** `ImportSession` is a module-level singleton, which means only one active import session can exist at a time per server process. In HTTP transport mode (`--transport streamable-http` or `--transport sse`), concurrent `apex_create_app()` calls from different clients would share and corrupt the same session state. For multi-user scenarios, run separate apex-mcp instances on different ports.

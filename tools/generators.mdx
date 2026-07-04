@@ -1,7 +1,7 @@
 ---
-title: "High-Level App Generators Reference"
+title: "apex-mcp Application Generator Tools Full Reference"
 sidebarTitle: "Generators"
-description: "Reference for apex-mcp high-level generators: CRUD pages, dashboards, login, reports, wizards, modal forms, schema-to-app generation, and REST endpoints."
+description: "Reference for apex-mcp high-level generators: CRUD pages, dashboards, login, reports, wizards, modal forms, schema-to-app, and REST endpoints."
 ---
 
 High-level generators compose multiple tool calls into a single operation — the fastest way to build Oracle APEX 24.2 applications. A single generator call can introspect your database schema, create multiple pages, wire up navigation, generate LOVs for foreign-key columns, and connect DML processes automatically. Use these tools first; reach for lower-level page and region tools only when you need to customize individual components.
@@ -498,36 +498,52 @@ Add an editable Interactive Grid (IG) region — spreadsheet-style inline editin
 <ParamField path="editable" type="boolean" default="true">Allow inline cell editing with INSERT/UPDATE/DELETE.</ParamField>
 <ParamField path="add_row" type="boolean" default="true">Show "Add Row" button in the toolbar.</ParamField>
 <ParamField path="sequence" type="integer" default="10">Region display order.</ParamField>
+<ParamField path="auth_scheme" type="string">Optional authorization scheme name to restrict access to this region.</ParamField>
 
 ---
 
 ### `apex_add_master_detail`
 
-Place a master Interactive Report and a detail Interactive Report on the same page, linked by a foreign key column.
+Place a master Interactive Report and a detail Interactive Report on the same page, linked by a foreign key column. Clicking a master row sets a hidden page item and refreshes the detail IR automatically.
 
 <ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
 <ParamField path="master_region_name" type="string" required>Name for the master IR region.</ParamField>
 <ParamField path="master_sql" type="string" required>SQL for the master IR.</ParamField>
 <ParamField path="detail_region_name" type="string" required>Name for the detail IR region.</ParamField>
-<ParamField path="detail_sql" type="string" required>SQL for the detail IR. Must reference a bind variable for the FK value.</ParamField>
-<ParamField path="fk_item_name" type="string" required>Page item name used to pass the selected master PK to the detail query.</ParamField>
+<ParamField path="detail_sql" type="string" required>SQL for the detail IR. Must reference a bind variable matching `P{page_id}_{page_item_name}` in its WHERE clause.</ParamField>
+<ParamField path="link_column" type="string" required>Column in the master IR whose value is passed to the hidden item when a row is clicked (e.g., `"ID"`).</ParamField>
+<ParamField path="page_item_name" type="string" required>Suffix for the hidden page item that stores the selected master row value (auto-prefixed with `P{page_id}_`). The bind variable in `detail_sql` must match.</ParamField>
+<ParamField path="sequence" type="integer" default="10">Display sequence for the master region (detail region gets `sequence + 10`).</ParamField>
 
 ---
 
 ### `apex_add_faceted_search`
 
-Add a faceted search panel (left-side filter checkboxes / ranges) linked to an Interactive Report.
+Add a faceted search panel (left-side filter select lists) linked to an Interactive Report. Creates a two-column layout with a filter region on the left and the IR on the right. Each facet generates a SELECT_LIST item; a Dynamic Action re-submits the page on filter change.
 
 <ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
 <ParamField path="region_name" type="string" required>Name for the IR region.</ParamField>
-<ParamField path="sql_query" type="string" required>SQL for the Interactive Report.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL for the Interactive Report. Must include `:{item_name}` bind-variable predicates for each facet column. Example:
+  ```sql
+  SELECT * FROM ORDERS
+   WHERE (:P10_STATUS IS NULL OR STATUS = :P10_STATUS)
+     AND (:P10_REGION IS NULL OR REGION = :P10_REGION)
+  ```
+</ParamField>
 <ParamField path="facets" type="array" required>
   List of facet definitions. Each object:
   ```json
-  {"column": "STATUS", "label": "Status", "type": "checkbox"}
+  {
+    "column": "STATUS",
+    "label": "Status",
+    "type": "select",
+    "lov": "SELECT DISTINCT STATUS d, STATUS r FROM ORDERS ORDER BY 1"
+  }
   ```
-  Supported `type` values: `checkbox`, `range`, `search`.
+  Supported `type` values: `select`, `checkbox` (both produce a SELECT_LIST with an "All" option). The `lov` key is optional — omitting it auto-generates a DISTINCT query from the source SQL.
 </ParamField>
+<ParamField path="sequence" type="integer" default="10">Display sequence for the filter region (IR gets `sequence + 10`).</ParamField>
 
 ---
 

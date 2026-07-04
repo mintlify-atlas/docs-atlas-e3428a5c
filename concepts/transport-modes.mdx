@@ -1,7 +1,7 @@
 ---
-title: "Transport Modes: stdio, HTTP, and SSE"
+title: "apex-mcp Transport Modes: stdio, Streamable HTTP, and SSE"
 sidebarTitle: "Transport Modes"
-description: "apex-mcp supports three MCP transport modes: stdio for local AI clients, streamable-HTTP for remote or multi-client setups, and SSE for legacy compatibility."
+description: "apex-mcp supports three MCP transport modes: stdio for local AI clients, streamable HTTP for remote setups, and SSE for clients requiring it."
 ---
 
 apex-mcp supports three MCP transport modes, selected via the `--transport` CLI flag or the `MCP_TRANSPORT` environment variable. Each mode targets a different deployment scenario: local AI clients that manage the server process directly, remote HTTP-based clients that connect to a running server, and legacy clients that require Server-Sent Events. If no transport is specified, apex-mcp defaults to `stdio`.
@@ -41,7 +41,7 @@ async with MCPServerStreamableHttp(url="http://127.0.0.1:8000/mcp") as apex:
 
 ## SSE (Server-Sent Events)
 
-The `sse` transport starts an HTTP server using the Server-Sent Events protocol. The endpoint is at `http://127.0.0.1:9000/sse` by default.
+The `sse` transport starts an HTTP server using the Server-Sent Events protocol. Like streamable HTTP, it binds to `127.0.0.1:8000` by default, with the endpoint path at `/sse`. The example below overrides the port to `9000`:
 
 ```bash
 apex-mcp --transport sse --port 9000

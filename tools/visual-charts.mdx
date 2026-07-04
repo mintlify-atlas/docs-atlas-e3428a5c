@@ -1,7 +1,7 @@
 ---
-title: "Charts, Visualizations, and Metric Components"
+title: "Oracle APEX JET Charts, Metric Cards, and Visualizations"
 sidebarTitle: "Charts & Visuals"
-description: "Reference for apex-mcp visual tools: Oracle JET charts (bar, line, pie, donut, area), gauges, funnels, sparklines, metric cards, calendars, and 10 advanced chart types."
+description: "Reference for apex-mcp visual tools: JET charts (bar, line, pie, donut, area), gauges, funnels, sparklines, metric cards, and 10 advanced types."
 ---
 
 apex-mcp chart tools are built on Oracle JET (JavaScript Extension Toolkit), Oracle's open-source UI component library. All chart regions use the native APEX `NATIVE_JET_CHART` engine — no external libraries, no CDN dependencies. Charts inherit your Universal Theme 42 color palette, font settings, and accessibility features, and are rendered server-side as APEX Import Script declarations, making them safe for all APEX 24.2 deployment environments.
@@ -17,10 +17,10 @@ Every chart tool creates an `APEX_REGION` plug (the container), a `JET_CHART` co
 
   | Chart type | Required aliases |
   |---|---|
-  | Bar, line, area, funnel | `LABEL` (X-axis / category), `VALUE` (Y-axis / magnitude) |
+  | Bar, bar_horizontal, line, area, funnel | `LABEL` (X-axis / category), `VALUE` (Y-axis / magnitude) |
   | Gauge / dial | `VALUE` (single numeric value) |
   | Stacked, combo | `LABEL`, `VALUE` per series (each series has its own SQL) |
-  | Scatter plot | `X` (horizontal position), `Y` (vertical position), optional `LABEL` |
+  | Scatter plot | `X` (horizontal — mapped to `label_column`), `Y` (vertical — mapped to `value_column`); use `apex_add_scatter_plot` for named X/Y/LABEL columns |
   | Range chart | `LABEL`, `LOW` (minimum), `HIGH` (maximum) |
   | Bubble chart | `X`, `Y`, `Z` (bubble size), optional `LABEL` |
   | Pareto chart | `LABEL`, `VALUE` (bars, ordered DESC — cumulative % line is auto-computed) |
@@ -53,6 +53,7 @@ Add an Oracle JET chart region to a page. Supports bar, line, area, pie, donut, 
   - `pie` — pie chart (distribution, no axes)
   - `donut` — donut chart (distribution with center hole)
   - `combo` — bar + line on the same chart (add line series via `extra_series`)
+  - `scatter` — scatter plot (use `label_column` for X, `value_column` for Y)
 </ParamField>
 
 <ParamField path="sql_query" type="string" required>
@@ -113,6 +114,10 @@ Add an Oracle JET chart region to a page. Supports bar, line, area, pie, donut, 
   ```
 </ParamField>
 
+<ParamField path="color_palette" type="array">
+  Optional list of hex color strings for chart series, e.g. `["#00995D","#1e88e5"]`. Accepted for API compatibility — color palette application depends on APEX 24.2 theme settings.
+</ParamField>
+
 **Example — line chart with two series:**
 
 ```python
@@ -155,6 +160,8 @@ Add a JET dial gauge chart. Ideal for KPI scores, completion rates, SLA metrics,
   If omitted, defaults to three zones: red (0–33%), orange (33–66%), green (66–100%).
 </ParamField>
 <ParamField path="height" type="integer" default="300">Gauge height in pixels.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
+<ParamField path="color" type="string">Optional single hex color for the gauge needle/fill (e.g., `"#00995D"`). Accepted for API compatibility.</ParamField>
 
 **Example:**
 
@@ -191,7 +198,10 @@ Add a JET funnel chart. Perfect for visualizing pipeline stages, approval flows,
 </ParamField>
 <ParamField path="label_column" type="string" default="LABEL">Column for stage labels.</ParamField>
 <ParamField path="value_column" type="string" default="VALUE">Column for stage values.</ParamField>
+<ParamField path="series_name" type="string">Display name for the data series shown in the legend. Defaults to `region_name`.</ParamField>
 <ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
+<ParamField path="color_palette" type="array">Optional list of hex colors per stage. Accepted for API compatibility.</ParamField>
 
 ---
 
@@ -314,7 +324,12 @@ Add a stacked bar or area chart with multiple SQL-driven series. Each series sta
 </ParamField>
 <ParamField path="chart_type" type="string" default="bar">`bar` or `area`.</ParamField>
 <ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+<ParamField path="x_axis_title" type="string">X-axis label.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
 <ParamField path="zoom_enabled" type="boolean" default="false">Enable zoom on chart axes.</ParamField>
+<ParamField path="scroll_enabled" type="boolean" default="false">Enable scroll on the chart.</ParamField>
+<ParamField path="animation" type="string" default="auto">Animation style: `auto`, `none`, `fade`, or `zoom`.</ParamField>
 <ParamField path="color_palette" type="array">List of hex colors for series (e.g., `["#00995D","#1e88e5"]`).</ParamField>
 
 **Example:**
@@ -349,9 +364,17 @@ Add a combo chart with bars on the primary (left) Y-axis and a line on the secon
 <ParamField path="line_sql" type="string" required>SQL for the line series (right Y-axis).</ParamField>
 <ParamField path="bar_name" type="string" default="Volume">Legend label for bars.</ParamField>
 <ParamField path="line_name" type="string" default="Trend">Legend label for the line.</ParamField>
+<ParamField path="bar_label_col" type="string" default="LABEL">X-axis column name in `bar_sql`.</ParamField>
+<ParamField path="bar_value_col" type="string" default="VALUE">Left Y-axis column name in `bar_sql`.</ParamField>
+<ParamField path="line_label_col" type="string" default="LABEL">X-axis column name in `line_sql`.</ParamField>
+<ParamField path="line_value_col" type="string" default="VALUE">Right Y-axis column name in `line_sql`.</ParamField>
 <ParamField path="y_axis_title" type="string">Left Y-axis label.</ParamField>
 <ParamField path="y2_axis_title" type="string">Right Y-axis label.</ParamField>
 <ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
+<ParamField path="zoom_enabled" type="boolean" default="false">Enable zoom on chart axes.</ParamField>
+<ParamField path="scroll_enabled" type="boolean" default="false">Enable scroll on the chart.</ParamField>
+<ParamField path="animation" type="string" default="auto">Animation style: `auto`, `none`, `fade`, or `zoom`.</ParamField>
 
 ---
 
@@ -370,7 +393,12 @@ Add a Pareto / 80-20 chart: descending bars (primary Y-axis) plus an auto-comput
 <ParamField path="value_column" type="string" default="VALUE">Column for numeric values.</ParamField>
 <ParamField path="bar_name" type="string" default="Count">Legend label for bars.</ParamField>
 <ParamField path="line_name" type="string" default="Cumulative %">Legend label for the cumulative line.</ParamField>
-<ParamField path="cumulative_sql" type="string">Custom SQL for the cumulative % line. Must return the same label column and a `VALUE` column.</ParamField>
+<ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
+<ParamField path="zoom_enabled" type="boolean" default="false">Enable zoom on chart axes.</ParamField>
+<ParamField path="scroll_enabled" type="boolean" default="false">Enable scroll on the chart.</ParamField>
+<ParamField path="animation" type="string" default="auto">Animation style: `auto`, `none`, `fade`, or `zoom`.</ParamField>
+<ParamField path="cumulative_sql" type="string">Custom SQL for the cumulative % line. Must return the same label column and a `VALUE` column. When omitted, the cumulative % is auto-computed via a window function.</ParamField>
 
 ---
 
@@ -388,8 +416,10 @@ Add a scatter plot to visualize correlation between two numeric variables. Each 
 <ParamField path="x_column" type="string" default="X">Column for X-axis numeric values.</ParamField>
 <ParamField path="y_column" type="string" default="Y">Column for Y-axis numeric values.</ParamField>
 <ParamField path="label_column" type="string" default="LABEL">Column for data-point tooltip labels.</ParamField>
+<ParamField path="series_name" type="string" default="Correlation">Legend label for the data series.</ParamField>
 <ParamField path="x_axis_title" type="string">X-axis label.</ParamField>
 <ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
 
 ---
 
@@ -407,7 +437,9 @@ Add a range (high-low) chart that shows min/max bands over categories. Useful fo
 <ParamField path="label_column" type="string" default="LABEL">Column for X-axis labels.</ParamField>
 <ParamField path="low_column" type="string" default="LOW">Column for minimum values.</ParamField>
 <ParamField path="high_column" type="string" default="HIGH">Column for maximum values.</ParamField>
+<ParamField path="series_name" type="string" default="Range">Legend label for the data series.</ParamField>
 <ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
 
 ---
 
@@ -421,9 +453,12 @@ Add a multi-series area chart. Pass `stacked=True` (default) for composition vie
 
 <ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
 <ParamField path="region_name" type="string" required>Region display name.</ParamField>
-<ParamField path="series_list" type="array" required>List of series objects, each with `name` and `sql`.</ParamField>
+<ParamField path="series_list" type="array" required>List of series objects, each with `name` and `sql`. Each series SQL must return `LABEL` and `VALUE` columns.</ParamField>
 <ParamField path="stacked" type="boolean" default="true">Stack series (composition view) or overlay.</ParamField>
 <ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+<ParamField path="x_axis_title" type="string">X-axis label.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
 
 ---
 
@@ -440,6 +475,9 @@ Add a count-up animated number display. The value is fetched from SQL at render 
 <ParamField path="suffix" type="string">Text appended to the number (e.g., `%`, ` pts`).</ParamField>
 <ParamField path="prefix" type="string">Text prepended to the number (e.g., `$`, `R$ `).</ParamField>
 <ParamField path="duration_ms" type="integer" default="2000">Count-up animation duration in milliseconds.</ParamField>
+<ParamField path="sequence" type="integer" default="10">Region display order on the page.</ParamField>
+<ParamField path="icon_size" type="string" default="2rem">CSS `font-size` for the icon.</ParamField>
+<ParamField path="number_size" type="string" default="2.8rem">CSS `font-size` for the animated counter value.</ParamField>
 
 **Example:**
 
@@ -471,10 +509,12 @@ Add a donut chart with an optional dynamic value displayed in the center hole vi
 <ParamField path="sql_query" type="string" required>SQL returning slice labels and values.</ParamField>
 <ParamField path="label_column" type="string" default="LABEL">Column for slice labels.</ParamField>
 <ParamField path="value_column" type="string" default="VALUE">Column for slice values.</ParamField>
+<ParamField path="series_name" type="string" default="Distribution">Legend label for the data series.</ParamField>
 <ParamField path="center_label_sql" type="string">SQL returning a VARCHAR2 value shown in the donut center.</ParamField>
 <ParamField path="center_label_text" type="string">Static fallback text for the donut center.</ParamField>
 <ParamField path="legend_position" type="string" default="end">`end`, `start`, `top`, `bottom`, or `none`.</ParamField>
 <ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
 
 ---
 
@@ -513,9 +553,14 @@ Add a bubble chart with X position, Y position, and Z bubble-size dimensions. Us
 <ParamField path="y_column" type="string" default="Y">Column for Y-axis position.</ParamField>
 <ParamField path="z_column" type="string" default="Z">Column for bubble size (larger value = bigger bubble).</ParamField>
 <ParamField path="label_column" type="string" default="LABEL">Column for tooltip/legend labels.</ParamField>
+<ParamField path="series_name" type="string" default="Bubbles">Legend label for the data series.</ParamField>
 <ParamField path="x_axis_title" type="string">X-axis label.</ParamField>
 <ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
 <ParamField path="height" type="integer" default="420">Chart height in pixels.</ParamField>
+<ParamField path="sequence" type="integer" default="20">Region display order on the page.</ParamField>
+<ParamField path="zoom_enabled" type="boolean" default="false">Enable zoom on chart axes.</ParamField>
+<ParamField path="scroll_enabled" type="boolean" default="false">Enable scroll on the chart.</ParamField>
+<ParamField path="animation" type="string" default="auto">Animation style: `auto`, `none`, `fade`, or `zoom`.</ParamField>
 
 **Example:**
 

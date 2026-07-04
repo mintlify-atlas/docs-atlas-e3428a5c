@@ -1,5 +1,5 @@
 ---
-title: "Rich HTML UI Components for APEX Pages"
+title: "apex-mcp Rich HTML UI Components for Oracle APEX Pages"
 sidebarTitle: "UI Components"
 description: "Reference for apex-mcp's 20 rich HTML UI components: hero banners, KPI rows, leaderboards, heatmaps, activity streams, progress trackers, and more."
 ---
@@ -75,6 +75,7 @@ Add multiple content panels with a tab bar. Clicking a tab button shows that pan
   ```
 </ParamField>
 <ParamField path="color" type="string" default="unimed">Accent color for the active tab indicator.</ParamField>
+<ParamField path="custom_css" type="string">Additional CSS rules injected into the component's style block.</ParamField>
 <ParamField path="sequence" type="integer" default="10">Display order on page.</ParamField>
 
 ---
@@ -88,6 +89,7 @@ Add an expand/collapse toggle region. Content is visible or hidden based on the 
 <ParamField path="content_html" type="string">Static HTML to display inside the collapsible body.</ParamField>
 <ParamField path="content_sql" type="string">SQL returning a VARCHAR2 value rendered as the body content. Overrides `content_html` if both are provided.</ParamField>
 <ParamField path="collapsed" type="boolean" default="false">Initial state: `true` = starts collapsed.</ParamField>
+<ParamField path="custom_css" type="string">Additional CSS rules injected into the component's style block.</ParamField>
 <ParamField path="sequence" type="integer" default="10">Display order on page.</ParamField>
 
 ---
@@ -189,6 +191,8 @@ Add a large centered spotlight display for a single primary KPI — the value is
 <ParamField path="prefix" type="string">Unit prefix (e.g., `$`, `R$ `).</ParamField>
 <ParamField path="subtitle_sql" type="string">Optional SQL for a smaller subtitle line below the label.</ParamField>
 <ParamField path="value_size" type="string" default="3.2rem">CSS `font-size` for the value.</ParamField>
+<ParamField path="icon_size" type="string" default="2.4rem">CSS `font-size` for the icon displayed above the value.</ParamField>
+<ParamField path="custom_css" type="string">Additional CSS rules injected into the component's style block.</ParamField>
 
 ---
 
@@ -270,6 +274,30 @@ Add a full-width colored ribbon with multiple KPI stats displayed side by side, 
   ```
 </ParamField>
 <ParamField path="bg_color" type="string" default="#f8f9fa">Ribbon background color (CSS value).</ParamField>
+
+---
+
+### `apex_add_icon_list`
+
+Add a vertical icon + label + value list from SQL. Each row shows a colored icon circle, a label, and a right-aligned value. Great for status summaries, category breakdowns, or configuration lists.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning label and value columns, optionally an icon column.
+  ```sql
+  SELECT DS_STATUS AS LABEL, COUNT(*) AS VALUE
+    FROM ORDERS
+   GROUP BY DS_STATUS
+   ORDER BY 1
+  ```
+</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for item labels.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for right-aligned values.</ParamField>
+<ParamField path="icon_column" type="string">Column providing a Font Awesome class per row (optional). When omitted, `default_icon` is used for all rows.</ParamField>
+<ParamField path="default_icon" type="string" default="fa-circle">Fallback Font Awesome icon class when `icon_column` is empty or not specified.</ParamField>
+<ParamField path="color" type="string" default="blue">Accent color for icons and values (named or hex).</ParamField>
+<ParamField path="sequence" type="integer" default="10">Display order on page.</ParamField>
 
 ---
 

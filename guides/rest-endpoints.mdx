@@ -1,5 +1,5 @@
 ---
-title: "Generate ORDS REST Endpoints for Oracle Tables"
+title: "Generate ORDS REST Endpoints for Oracle Database Tables"
 sidebarTitle: "REST Endpoints"
 description: "Use apex_generate_rest_endpoints to create ORDS REST API endpoints (GET, POST, PUT, DELETE) for Oracle database tables in seconds."
 ---
@@ -68,7 +68,7 @@ apex_generate_rest_endpoints(
 
 The full URL for each endpoint follows the ORDS schema-based routing pattern:
 
-```
+```text
 # Collection (list / create):
 https://<adb-host>/ords/<schema>/<base_path>/
 
@@ -78,7 +78,7 @@ https://<adb-host>/ords/<schema>/<base_path>/:<pk_column_lower>
 
 For an Oracle Autonomous Database instance, this looks like:
 
-```
+```text
 GET    https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/
 POST   https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/
 GET    https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/101
