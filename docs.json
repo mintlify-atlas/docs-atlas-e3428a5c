@@ -1,72 +1,116 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "apex-mcp",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#dedede",
+    "light": "#fbde58",
+    "dark": "#dedede"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://media.brand.dev/b3ea5921-97d6-4dda-9719-2b759af4eb1f.png",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/d2aa9377-dc96-447c-87c9-0284e1bca028.png",
+    "dark": "https://media.brand.dev/d2aa9377-dc96-447c-87c9-0284e1bca028.png"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/TechFernandesLTDA/apex-mcp"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/TechFernandesLTDA/apex-mcp"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "AI Client Setup",
+            "pages": [
+              "clients/claude",
+              "clients/cursor",
+              "clients/vscode",
+              "clients/gemini",
+              "clients/gpt",
+              "clients/zai"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/transport-modes",
+              "concepts/app-lifecycle",
+              "concepts/batch-and-dryrun"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/build-first-app",
+              "guides/crud-generation",
+              "guides/dashboards-charts",
+              "guides/schema-introspection",
+              "guides/rest-endpoints"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tool Reference",
+        "groups": [
+          {
+            "group": "Connection & Setup",
+            "pages": [
+              "tools/connection",
+              "tools/setup"
+            ]
+          },
+          {
+            "group": "Apps & Pages",
+            "pages": [
+              "tools/apps",
+              "tools/pages"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "tools/components",
+              "tools/shared-components",
+              "tools/validations"
+            ]
+          },
+          {
+            "group": "Generators",
+            "pages": [
+              "tools/generators",
+              "tools/visual-charts",
+              "tools/ui-components"
+            ]
+          },
+          {
+            "group": "DevOps & Advanced",
+            "pages": [
+              "tools/devops",
+              "tools/javascript",
+              "tools/inspect"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

@@ -1,0 +1,102 @@
+---
+title: "Batch Mode and Dry-Run Mode in apex-mcp"
+sidebarTitle: "Batch & Dry-Run"
+description: "Use batch mode to execute multiple Oracle operations in a single DB round-trip, and dry-run mode to preview all generated PL/SQL without executing it."
+---
+
+apex-mcp provides two operational modes — batch and dry-run — that give you control over how and when generated PL/SQL reaches the database. Batch mode optimizes performance by collapsing many operations into a single network round-trip. Dry-run mode lets you inspect exactly what PL/SQL apex-mcp would execute, without touching the database at all. Both modes are controlled through standard tool calls and require no configuration changes.
+
+## Batch Mode
+
+### What It Does
+
+Calling `apex_begin_batch()` puts the `ConnectionManager` into batch mode. From that point on, every `db.plsql()` call — which is what all component-creation tools use internally — queues its PL/SQL block in an in-memory list instead of executing it immediately. Nothing reaches the database until you call `apex_commit_batch()`, which sends all queued statements in a single connection round-trip and issues one `COMMIT`.
+
+### Why Use It
+
+Each tool call normally executes one PL/SQL block and commits it individually. When you're adding many components — a full CRUD page pair, a dashboard with multiple charts, or an app with dozens of items — each call incurs a separate network round-trip to Oracle. Batch mode eliminates this overhead by combining all statements into one execution, which can dramatically reduce total build time for complex applications.
+
+### Example
+
+```python
+apex_begin_batch()
+
+# All of the following are queued, not executed:
+apex_add_region(page_id=1, region_name="Employee List", region_type="IR",
+                sql_query="SELECT * FROM EMPLOYEES")
+apex_add_item(page_id=1, item_name="DEPARTMENT_ID", item_type="select",
+              label="Department")
+apex_add_item(page_id=1, item_name="JOB_ID", item_type="select",
+              label="Job")
+apex_add_button(page_id=1, button_name="SEARCH", label="Search")
+apex_add_jet_chart(page_id=1, chart_name="Headcount by Dept",
+                   chart_type="bar",
+                   sql_query="SELECT dept, COUNT(*) VALUE FROM EMPLOYEES GROUP BY dept")
+
+# All five statements execute in one DB round-trip:
+apex_commit_batch(rollback_on_error=True)
+```
+
+### rollback_on_error
+
+The `rollback_on_error` parameter (default: `True`) controls what happens if any statement in the batch fails:
+
+- **`rollback_on_error=True` (default):** If any statement raises an Oracle error, the entire batch is rolled back. No partial changes are committed. The returned log will contain an `ERR:` line for the failing statement and a `ROLLBACK:` summary line.
+- **`rollback_on_error=False`:** All statements that succeed are committed, even if others fail. The log will contain `ERR:` lines for failures and a `COMMIT: partial commit...` summary line.
+
+Using the default `True` is recommended during app builds — a failed component creation that partially succeeds can leave your app in an inconsistent state.
+
+## Dry-Run Mode
+
+### What It Does
+
+Calling `apex_dry_run_preview(enabled=True)` puts the `ConnectionManager` into dry-run mode. In this mode, every `db.plsql()` call appends the generated PL/SQL block to an in-memory log buffer instead of executing it. No database changes occur. Calling `apex_dry_run_preview(enabled=False)` disables dry-run mode and returns the full accumulated SQL log as a string.
+
+### Why Use It
+
+Dry-run mode is the safest way to understand what apex-mcp will do before committing. Use it to:
+
+- **Review generated code** before running it in production.
+- **Debug tool behavior** when a component isn't being created as expected.
+- **Learn the PL/SQL API** — see exactly which `wwv_flow_imp_page.*` procedures are called and with what parameters.
+- **Audit complex builds** — capture the full SQL for a CRUD generator or schema-to-app workflow.
+
+### Example
+
+```python
+# Enable dry-run — no DB changes from this point forward
+apex_dry_run_preview(enabled=True)
+
+# This generates PL/SQL but does NOT execute it
+apex_generate_crud("EMPLOYEES", list_page_id=10, form_page_id=11)
+
+# Disable dry-run — returns the full SQL log
+sql_log = apex_dry_run_preview(enabled=False)
+print(sql_log)
+# → BEGIN wwv_flow_imp_page.create_page( p_id=>10, ... ); END;
+# → BEGIN wwv_flow_imp_page.create_region( ... ); END;
+# → ... (one block per component)
+```
+
+## Combining Modes
+
+Dry-run mode takes precedence over batch mode. If both are active simultaneously, `db.plsql()` records statements in the dry-run log and does **not** add them to the batch queue. Nothing is executed, regardless of batch state.
+
+<Note>
+If you enable dry-run mode while batch mode is already active, the batch queue is not affected — it retains whatever was queued before dry-run was enabled. Statements added while dry-run is active go only to the dry-run log.
+</Note>
+
+## Undoing the Last Operation
+
+If you need to roll back a single component without abandoning the entire session, call `apex_undo_last()`. This undoes the most recently created component (region, item, button, etc.) by reverting the last tracked change in the `ImportSession` and issuing the appropriate `DELETE` call against the database.
+
+```python
+apex_add_region(page_id=1, region_name="Typo Regoin", region_type="STATIC")
+
+# Oops — undo that last region
+apex_undo_last()
+
+apex_add_region(page_id=1, region_name="Correct Region", region_type="STATIC")
+```
+
+`apex_undo_last()` only undoes one step at a time. For larger rollbacks, use `apex_delete_region()`, `apex_delete_item()`, or `apex_delete_page()` to remove specific components by ID.

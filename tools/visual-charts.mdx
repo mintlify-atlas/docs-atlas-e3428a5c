@@ -1,0 +1,537 @@
+---
+title: "Charts, Visualizations, and Metric Components"
+sidebarTitle: "Charts & Visuals"
+description: "Reference for apex-mcp visual tools: Oracle JET charts (bar, line, pie, donut, area), gauges, funnels, sparklines, metric cards, calendars, and 10 advanced chart types."
+---
+
+apex-mcp chart tools are built on Oracle JET (JavaScript Extension Toolkit), Oracle's open-source UI component library. All chart regions use the native APEX `NATIVE_JET_CHART` engine — no external libraries, no CDN dependencies. Charts inherit your Universal Theme 42 color palette, font settings, and accessibility features, and are rendered server-side as APEX Import Script declarations, making them safe for all APEX 24.2 deployment environments.
+
+Every chart tool creates an `APEX_REGION` plug (the container), a `JET_CHART` config record, one or more `JET_CHART_SERIES` records, and (for non-pie types) `JET_CHART_AXIS` records for the X and Y axes.
+
+---
+
+## SQL Aliasing Requirements
+
+<Note>
+  All chart SQL queries must use specific column aliases for apex-mcp to correctly wire up the JET chart series configuration. Using the wrong alias name is the most common source of empty or broken charts.
+
+  | Chart type | Required aliases |
+  |---|---|
+  | Bar, line, area, funnel | `LABEL` (X-axis / category), `VALUE` (Y-axis / magnitude) |
+  | Gauge / dial | `VALUE` (single numeric value) |
+  | Stacked, combo | `LABEL`, `VALUE` per series (each series has its own SQL) |
+  | Scatter plot | `X` (horizontal position), `Y` (vertical position), optional `LABEL` |
+  | Range chart | `LABEL`, `LOW` (minimum), `HIGH` (maximum) |
+  | Bubble chart | `X`, `Y`, `Z` (bubble size), optional `LABEL` |
+  | Pareto chart | `LABEL`, `VALUE` (bars, ordered DESC — cumulative % line is auto-computed) |
+
+  You can override default alias names with the `label_column`, `value_column`, etc. parameters where available.
+</Note>
+
+---
+
+## Core JET Charts
+
+### `apex_add_jet_chart`
+
+Add an Oracle JET chart region to a page. Supports bar, line, area, pie, donut, and combo types. This is the primary chart tool; all advanced chart tools delegate to it internally.
+
+<ParamField path="page_id" type="integer" required>
+  Target page ID. Must already exist in the session.
+</ParamField>
+
+<ParamField path="region_name" type="string" required>
+  Region title shown in the APEX page.
+</ParamField>
+
+<ParamField path="chart_type" type="string" default="bar">
+  Chart style. Accepted values:
+  - `bar` — vertical bar chart
+  - `bar_horizontal` — horizontal bar chart
+  - `line` — line chart (good for trends over time)
+  - `area` — filled area chart (good for cumulative data)
+  - `pie` — pie chart (distribution, no axes)
+  - `donut` — donut chart (distribution with center hole)
+  - `combo` — bar + line on the same chart (add line series via `extra_series`)
+</ParamField>
+
+<ParamField path="sql_query" type="string" required>
+  SQL returning at least two columns. Default aliases: `LABEL` (X-axis) and `VALUE` (Y-axis).
+  ```sql
+  SELECT STATUS AS LABEL, COUNT(*) AS VALUE
+    FROM ORDERS
+   GROUP BY STATUS
+   ORDER BY 1
+  ```
+</ParamField>
+
+<ParamField path="label_column" type="string" default="LABEL">
+  Column name used for X-axis categories / pie slices.
+</ParamField>
+
+<ParamField path="value_column" type="string" default="VALUE">
+  Column name used for Y-axis values / slice sizes.
+</ParamField>
+
+<ParamField path="series_name" type="string">
+  Display name for the data series (shown in legend and tooltip). Defaults to `region_name`.
+</ParamField>
+
+<ParamField path="height" type="integer" default="400">
+  Chart height in pixels.
+</ParamField>
+
+<ParamField path="y_axis_title" type="string">
+  Optional Y-axis label.
+</ParamField>
+
+<ParamField path="x_axis_title" type="string">
+  Optional X-axis label.
+</ParamField>
+
+<ParamField path="legend_position" type="string" default="end">
+  Where to show the legend: `end` (right), `top`, `bottom`, `start` (left), `auto`.
+</ParamField>
+
+<ParamField path="orientation" type="string" default="vertical">
+  `vertical` or `horizontal`. For bar charts only; `bar_horizontal` sets this automatically.
+</ParamField>
+
+<ParamField path="sequence" type="integer" default="20">
+  Region display order on the page.
+</ParamField>
+
+<ParamField path="extra_series" type="array">
+  Additional data series for multi-series charts. Each object:
+  ```json
+  {
+    "sql": "SELECT MONTH LABEL, RETURNS VALUE FROM MONTHLY_RETURNS ORDER BY 1",
+    "value_column": "VALUE",
+    "label_column": "LABEL",
+    "series_name": "Returns"
+  }
+  ```
+</ParamField>
+
+**Example — line chart with two series:**
+
+```python
+apex_add_jet_chart(
+    page_id=5,
+    region_name="Monthly Sales vs Returns",
+    chart_type="line",
+    sql_query="SELECT TO_CHAR(ORDER_DATE,'MM/YYYY') LABEL, SUM(AMOUNT) VALUE FROM ORDERS GROUP BY TO_CHAR(ORDER_DATE,'MM/YYYY') ORDER BY 1",
+    series_name="Sales",
+    y_axis_title="Amount ($)",
+    x_axis_title="Month",
+    extra_series=[
+        {
+            "sql": "SELECT TO_CHAR(RETURN_DATE,'MM/YYYY') LABEL, SUM(AMOUNT) VALUE FROM RETURNS GROUP BY TO_CHAR(RETURN_DATE,'MM/YYYY') ORDER BY 1",
+            "series_name": "Returns",
+        }
+    ],
+)
+```
+
+---
+
+### `apex_add_gauge`
+
+Add a JET dial gauge chart. Ideal for KPI scores, completion rates, SLA metrics, and health indicators. Renders as a circular dial with colored threshold zones.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region title.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning a single numeric value.
+  ```sql
+  SELECT ROUND(AVG(SCORE)) AS VALUE FROM ASSESSMENTS
+  ```
+</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column name with the gauge value.</ParamField>
+<ParamField path="min_value" type="number" default="0">Minimum scale value.</ParamField>
+<ParamField path="max_value" type="number" default="100">Maximum scale value.</ParamField>
+<ParamField path="thresholds" type="array">
+  List of threshold zone dicts. Each object: `{"value": 33, "color": "#e53935"}`.
+  If omitted, defaults to three zones: red (0–33%), orange (33–66%), green (66–100%).
+</ParamField>
+<ParamField path="height" type="integer" default="300">Gauge height in pixels.</ParamField>
+
+**Example:**
+
+```python
+apex_add_gauge(
+    page_id=5,
+    region_name="SLA Compliance",
+    sql_query="SELECT ROUND(SUM(CASE WHEN RESOLVED_IN_SLA='Y' THEN 1 ELSE 0 END) / COUNT(*) * 100) AS VALUE FROM TICKETS",
+    min_value=0,
+    max_value=100,
+    thresholds=[
+        {"value": 60,  "color": "#e53935"},
+        {"value": 80,  "color": "#fb8c00"},
+        {"value": 100, "color": "#43a047"},
+    ],
+)
+```
+
+---
+
+### `apex_add_funnel`
+
+Add a JET funnel chart. Perfect for visualizing pipeline stages, approval flows, or conversion steps. Each SQL row represents one funnel stage.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region title.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL ordered from largest to smallest stage.
+  ```sql
+  SELECT STAGE_NAME AS LABEL, RECORD_COUNT AS VALUE
+    FROM PIPELINE_STAGES
+   ORDER BY SEQUENCE_NO
+  ```
+</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for stage labels.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for stage values.</ParamField>
+<ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+
+---
+
+### `apex_add_sparkline`
+
+Add metric cards with inline sparkline trend bars. Each card shows a title, current value, and a mini 7-bar trend chart rendered entirely in PL/SQL.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region name.</ParamField>
+<ParamField path="metrics" type="array" required>
+  List of metric definitions. Each object:
+  ```json
+  {
+    "label":     "Monthly Sales",
+    "sql":       "SELECT SUM(AMOUNT) FROM ORDERS WHERE TRUNC(ORDER_DATE,'MM') = TRUNC(SYSDATE,'MM')",
+    "trend_sql": "SELECT SUM(AMOUNT) AS VALUE FROM ORDERS GROUP BY TRUNC(ORDER_DATE,'MM') ORDER BY 1 DESC FETCH FIRST 7 ROWS ONLY",
+    "icon":      "fa-chart-line",
+    "color":     "#00995D",
+    "suffix":    "",
+    "prefix":    "$"
+  }
+  ```
+  `trend_sql` must return a `VALUE` column (up to 7 rows).
+</ParamField>
+<ParamField path="columns" type="integer" default="4">Number of columns in the card grid (2–4).</ParamField>
+
+---
+
+### `apex_add_metric_cards`
+
+Add modern KPI metric cards with animated count-up numbers, icons, and optional drill-down links. Rendered as a `NATIVE_PLSQL` region — no external libraries required.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region name (hidden by default).</ParamField>
+<ParamField path="metrics" type="array" required>
+  List of metric definitions. Each object:
+  ```json
+  {
+    "label":     "Active Users",
+    "sql":       "SELECT COUNT(*) FROM USERS WHERE FL_ATIVO = 'S'",
+    "icon":      "fa-users",
+    "color":     "green",
+    "prefix":    "",
+    "suffix":    "",
+    "subtitle":  "registered accounts",
+    "link_page": 10
+  }
+  ```
+  Named colors: `blue`, `green`, `orange`, `red`, `purple`, `teal`, `indigo`, `amber`. Auto-assigned if omitted.
+</ParamField>
+<ParamField path="columns" type="integer" default="4">Grid columns (2, 3, 4, or 6).</ParamField>
+<ParamField path="style" type="string" default="gradient">
+  Visual style: `gradient` (colored gradient background), `white` (white card with accent border), `dark` (dark card with neon accent).
+</ParamField>
+
+**Example:**
+
+```python
+apex_add_metric_cards(
+    page_id=1,
+    region_name="KPIs",
+    metrics=[
+        {"label": "Total Orders",    "sql": "SELECT COUNT(*) FROM ORDERS",                          "icon": "fa-shopping-cart", "color": "blue"},
+        {"label": "Revenue MTD",     "sql": "SELECT TO_CHAR(SUM(AMOUNT),'FM$999,990') FROM ORDERS WHERE TRUNC(ORDER_DATE,'MM')=TRUNC(SYSDATE,'MM')", "icon": "fa-dollar", "color": "green", "prefix": "$"},
+        {"label": "Pending Orders",  "sql": "SELECT COUNT(*) FROM ORDERS WHERE STATUS='PENDING'",   "icon": "fa-clock",         "color": "orange"},
+        {"label": "Cancelled",       "sql": "SELECT COUNT(*) FROM ORDERS WHERE STATUS='CANCELLED'", "icon": "fa-times-circle",  "color": "red"},
+    ],
+    columns=4,
+    style="gradient",
+)
+```
+
+---
+
+### `apex_add_calendar`
+
+Add a CSS Calendar region (`NATIVE_CSS_CALENDAR`) to a page. Supports month, week, day, and list views.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region title.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning event data. Must include the `date_column` and `title_column` at minimum.
+  ```sql
+  SELECT EVENT_DATE, EVENT_TITLE, EVENT_END_DATE
+    FROM EVENTS
+   WHERE STATUS != 'CANCELLED'
+  ```
+</ParamField>
+<ParamField path="date_column" type="string" required>Column name for the event start date/datetime.</ParamField>
+<ParamField path="title_column" type="string" required>Column name for the event title.</ParamField>
+<ParamField path="end_date_column" type="string">Optional column for event end date/datetime (enables multi-day events).</ParamField>
+<ParamField path="display_as" type="string" default="month">Default view: `month`, `week`, `day`, or `list`.</ParamField>
+
+---
+
+## Advanced Chart Types
+
+The following 10 tools from `chart_tools.py` extend the core JET chart engine with specialized configurations.
+
+### `apex_add_stacked_chart`
+
+Add a stacked bar or area chart with multiple SQL-driven series. Each series stacks on top of the previous — ideal for showing composition across categories.
+
+<Note>
+  Each series has its own SQL query and must return `LABEL` and `VALUE` columns (or use custom `label_column`/`value_column` per series). All series must share the same X-axis category labels for the stacking to align correctly.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="series_list" type="array" required>
+  List of 1–10 series objects. Each:
+  ```json
+  {
+    "name":         "Completed",
+    "sql":          "SELECT DEPT LABEL, COUNT(*) VALUE FROM TASKS WHERE STATUS='DONE' GROUP BY DEPT ORDER BY 1",
+    "label_column": "LABEL",
+    "value_column": "VALUE"
+  }
+  ```
+</ParamField>
+<ParamField path="chart_type" type="string" default="bar">`bar` or `area`.</ParamField>
+<ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+<ParamField path="zoom_enabled" type="boolean" default="false">Enable zoom on chart axes.</ParamField>
+<ParamField path="color_palette" type="array">List of hex colors for series (e.g., `["#00995D","#1e88e5"]`).</ParamField>
+
+**Example:**
+
+```python
+apex_add_stacked_chart(
+    page_id=5,
+    region_name="Tasks by Department & Status",
+    series_list=[
+        {"name": "Done",        "sql": "SELECT DEPT LABEL, COUNT(*) VALUE FROM TASKS WHERE STATUS='DONE'   GROUP BY DEPT ORDER BY 1"},
+        {"name": "In Progress", "sql": "SELECT DEPT LABEL, COUNT(*) VALUE FROM TASKS WHERE STATUS='ACTIVE' GROUP BY DEPT ORDER BY 1"},
+        {"name": "Blocked",     "sql": "SELECT DEPT LABEL, COUNT(*) VALUE FROM TASKS WHERE STATUS='HOLD'   GROUP BY DEPT ORDER BY 1"},
+    ],
+)
+```
+
+---
+
+### `apex_add_combo_chart`
+
+Add a combo chart with bars on the primary (left) Y-axis and a line on the secondary (right) Y-axis. Bar and line series can have different scales — ideal for volume vs. rate/percentage analysis.
+
+<Note>
+  `bar_sql` must return `LABEL` and `VALUE` (or use `bar_label_col`/`bar_value_col`).
+  `line_sql` must return `LABEL` and `VALUE` (or use `line_label_col`/`line_value_col`).
+  Both queries must produce the same X-axis category labels for alignment.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="bar_sql" type="string" required>SQL for the bar series (left Y-axis).</ParamField>
+<ParamField path="line_sql" type="string" required>SQL for the line series (right Y-axis).</ParamField>
+<ParamField path="bar_name" type="string" default="Volume">Legend label for bars.</ParamField>
+<ParamField path="line_name" type="string" default="Trend">Legend label for the line.</ParamField>
+<ParamField path="y_axis_title" type="string">Left Y-axis label.</ParamField>
+<ParamField path="y2_axis_title" type="string">Right Y-axis label.</ParamField>
+<ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+
+---
+
+### `apex_add_pareto_chart`
+
+Add a Pareto / 80-20 chart: descending bars (primary Y-axis) plus an auto-computed cumulative percentage line (secondary Y-axis). SQL should be ordered by value DESC.
+
+<Note>
+  SQL must return `LABEL` and `VALUE` columns, ordered by `VALUE DESC`. The cumulative percentage line is computed automatically via a window function unless you provide `cumulative_sql`.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning `LABEL` and `VALUE`, ordered DESC.</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for categories.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for numeric values.</ParamField>
+<ParamField path="bar_name" type="string" default="Count">Legend label for bars.</ParamField>
+<ParamField path="line_name" type="string" default="Cumulative %">Legend label for the cumulative line.</ParamField>
+<ParamField path="cumulative_sql" type="string">Custom SQL for the cumulative % line. Must return the same label column and a `VALUE` column.</ParamField>
+
+---
+
+### `apex_add_scatter_plot`
+
+Add a scatter plot to visualize correlation between two numeric variables. Each point shows X vs Y position with a label in the tooltip.
+
+<Note>
+  SQL must return `X` (horizontal) and `Y` (vertical) numeric columns, plus an optional `LABEL` column for tooltip display. Override defaults with `x_column`, `y_column`, `label_column` parameters.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning `X`, `Y`, and optionally `LABEL`.</ParamField>
+<ParamField path="x_column" type="string" default="X">Column for X-axis numeric values.</ParamField>
+<ParamField path="y_column" type="string" default="Y">Column for Y-axis numeric values.</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for data-point tooltip labels.</ParamField>
+<ParamField path="x_axis_title" type="string">X-axis label.</ParamField>
+<ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+
+---
+
+### `apex_add_range_chart`
+
+Add a range (high-low) chart that shows min/max bands over categories. Useful for score variance, confidence intervals, or min/max per period.
+
+<Note>
+  SQL must return `LABEL`, `LOW` (minimum), and `HIGH` (maximum) columns. Override defaults with `label_column`, `low_column`, `high_column`.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning label, low, and high columns.</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for X-axis labels.</ParamField>
+<ParamField path="low_column" type="string" default="LOW">Column for minimum values.</ParamField>
+<ParamField path="high_column" type="string" default="HIGH">Column for maximum values.</ParamField>
+<ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+
+---
+
+### `apex_add_area_chart`
+
+Add a multi-series area chart. Pass `stacked=True` (default) for composition views, or `stacked=False` for overlapping areas.
+
+<Note>
+  Each series dict must have `name` and `sql` keys. SQL must return `LABEL` and `VALUE` columns.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="series_list" type="array" required>List of series objects, each with `name` and `sql`.</ParamField>
+<ParamField path="stacked" type="boolean" default="true">Stack series (composition view) or overlay.</ParamField>
+<ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+
+---
+
+### `apex_add_animated_counter`
+
+Add a count-up animated number display. The value is fetched from SQL at render time, then JavaScript counts up from 0 to the target on page load.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning a single numeric value.</ParamField>
+<ParamField path="label" type="string" required>Description shown below the animated number.</ParamField>
+<ParamField path="color" type="string" default="unimed">Accent color for the number (named or hex).</ParamField>
+<ParamField path="icon" type="string" default="fa-tachometer">Font Awesome class displayed above the number.</ParamField>
+<ParamField path="suffix" type="string">Text appended to the number (e.g., `%`, ` pts`).</ParamField>
+<ParamField path="prefix" type="string">Text prepended to the number (e.g., `$`, `R$ `).</ParamField>
+<ParamField path="duration_ms" type="integer" default="2000">Count-up animation duration in milliseconds.</ParamField>
+
+**Example:**
+
+```python
+apex_add_animated_counter(
+    page_id=1,
+    region_name="Total Employees Counter",
+    sql_query="SELECT COUNT(*) FROM EMPLOYEES WHERE ACTIVE = 'Y'",
+    label="Active Employees",
+    color="green",
+    icon="fa-users",
+    suffix=" staff",
+    duration_ms=1500,
+)
+```
+
+---
+
+### `apex_add_gradient_donut`
+
+Add a donut chart with an optional dynamic value displayed in the center hole via a CSS overlay region.
+
+<Note>
+  SQL must return `LABEL` and `VALUE` columns (or use `label_column`/`value_column` overrides).
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning slice labels and values.</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for slice labels.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for slice values.</ParamField>
+<ParamField path="center_label_sql" type="string">SQL returning a VARCHAR2 value shown in the donut center.</ParamField>
+<ParamField path="center_label_text" type="string">Static fallback text for the donut center.</ParamField>
+<ParamField path="legend_position" type="string" default="end">`end`, `start`, `top`, `bottom`, or `none`.</ParamField>
+<ParamField path="height" type="integer" default="380">Chart height in pixels.</ParamField>
+
+---
+
+### `apex_add_mini_charts_row`
+
+Add a row of 1–6 compact mini charts side by side. Each mini chart is a standard JET chart rendered at reduced height, ideal for dashboard comparison rows.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="charts" type="array" required>
+  List of 1–6 chart definition objects. Each:
+  ```json
+  {
+    "region_name": "Sales",
+    "chart_type":  "bar",
+    "sql":         "SELECT MONTH LABEL, AMOUNT VALUE FROM MONTHLY_SALES ORDER BY 1",
+    "height":      220
+  }
+  ```
+</ParamField>
+<ParamField path="sequence" type="integer" default="20">Base display order (each chart gets `sequence + i`).</ParamField>
+
+---
+
+### `apex_add_bubble_chart`
+
+Add a bubble chart with X position, Y position, and Z bubble-size dimensions. Useful for comparing three metrics across categories simultaneously.
+
+<Note>
+  SQL must return `X` (horizontal), `Y` (vertical), `Z` (bubble size), and optional `LABEL` columns. Override defaults with `x_column`, `y_column`, `z_column`, `label_column`.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning `X`, `Y`, `Z`, and optional `LABEL` columns.</ParamField>
+<ParamField path="x_column" type="string" default="X">Column for X-axis position.</ParamField>
+<ParamField path="y_column" type="string" default="Y">Column for Y-axis position.</ParamField>
+<ParamField path="z_column" type="string" default="Z">Column for bubble size (larger value = bigger bubble).</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for tooltip/legend labels.</ParamField>
+<ParamField path="x_axis_title" type="string">X-axis label.</ParamField>
+<ParamField path="y_axis_title" type="string">Y-axis label.</ParamField>
+<ParamField path="height" type="integer" default="420">Chart height in pixels.</ParamField>
+
+**Example:**
+
+```python
+apex_add_bubble_chart(
+    page_id=5,
+    region_name="Rep Performance",
+    sql_query="""
+        SELECT REP_NAME LABEL,
+               DEALS_CLOSED X,
+               ROUND(AVG_DEAL_SIZE, 0) Y,
+               TOTAL_REVENUE Z
+          FROM SALES_REPS
+         ORDER BY TOTAL_REVENUE DESC
+    """,
+    x_axis_title="Deals Closed",
+    y_axis_title="Avg Deal Size ($)",
+)
+```

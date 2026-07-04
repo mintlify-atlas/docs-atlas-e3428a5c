@@ -1,0 +1,293 @@
+---
+title: "Inspect Oracle Schema and Detect Table Relationships"
+sidebarTitle: "Schema Introspection"
+description: "Use apex-mcp schema tools to list tables, describe column types and constraints, and auto-detect FK relationships before building APEX applications."
+---
+
+Before building an APEX app, use apex-mcp's schema introspection tools to understand your database structure. Knowing your column types, primary keys, foreign keys, and table relationships upfront lets the CRUD generators make better decisions — and saves you from discovering schema mismatches after pages have already been created.
+
+## `apex_list_tables`
+
+Lists all tables and/or views in the current Oracle schema with row counts and optional column details. No parameters required after connecting.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | `str` | `"%"` | SQL `LIKE` pattern to filter object names |
+| `include_columns` | `bool` | `True` | Include column metadata for each object |
+| `object_type` | `str` | `"TABLE"` | `"TABLE"`, `"VIEW"`, or `"ALL"` |
+
+### Example
+
+```python
+# List all tables
+apex_list_tables()
+
+# List only tables matching a prefix
+apex_list_tables(pattern="EMP%")
+
+# Quick name list only (no column detail)
+apex_list_tables(include_columns=False)
+
+# Include views
+apex_list_tables(object_type="ALL")
+```
+
+### Return Structure
+
+```json
+{
+  "status": "ok",
+  "count": 3,
+  "data": [
+    {
+      "object_name": "DEPARTMENTS",
+      "object_type": "TABLE",
+      "num_rows": 27,
+      "columns": [
+        {"column_name": "DEPARTMENT_ID",   "data_type": "NUMBER",   "nullable": "N", "data_length": 22},
+        {"column_name": "DEPARTMENT_NAME", "data_type": "VARCHAR2", "nullable": "N", "data_length": 30},
+        {"column_name": "MANAGER_ID",      "data_type": "NUMBER",   "nullable": "Y", "data_length": 22},
+        {"column_name": "LOCATION_ID",     "data_type": "NUMBER",   "nullable": "Y", "data_length": 22}
+      ]
+    }
+  ]
+}
+```
+
+<Note>
+  `num_rows` comes from Oracle table statistics (`user_tables.num_rows`) and may be stale if the table has not been analyzed recently. Run `DBMS_STATS.GATHER_TABLE_STATS` to refresh.
+</Note>
+
+---
+
+## `apex_describe_table`
+
+Returns complete schema metadata for a single table: columns with types and lengths, primary key, foreign keys, indexes, associated sequences, and triggers.
+
+Results are **cached per session for 5 minutes** to avoid redundant database round-trips when the same table is queried multiple times during a build.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `table_name` | `str` | *(required)* | Table name (case-insensitive) |
+| `force_refresh` | `bool` | `False` | Bypass the 5-minute TTL cache and fetch fresh from the database |
+
+### Example
+
+```python
+apex_describe_table("EMPLOYEES")
+```
+
+### Return Structure
+
+```json
+{
+  "table_name": "EMPLOYEES",
+  "columns": [
+    {"column_name": "EMPLOYEE_ID",  "data_type": "NUMBER",   "data_length": 22, "nullable": "N", "column_id": 1, "data_default": null},
+    {"column_name": "FIRST_NAME",   "data_type": "VARCHAR2", "data_length": 20, "nullable": "Y", "column_id": 2, "data_default": null},
+    {"column_name": "LAST_NAME",    "data_type": "VARCHAR2", "data_length": 25, "nullable": "N", "column_id": 3, "data_default": null},
+    {"column_name": "HIRE_DATE",    "data_type": "DATE",     "data_length": 7,  "nullable": "N", "column_id": 6, "data_default": null},
+    {"column_name": "SALARY",       "data_type": "NUMBER",   "data_length": 22, "nullable": "Y", "column_id": 8, "data_default": null},
+    {"column_name": "DEPARTMENT_ID","data_type": "NUMBER",   "data_length": 22, "nullable": "Y", "column_id": 11,"data_default": null}
+  ],
+  "primary_key": {
+    "constraint_name": "EMP_EMP_ID_PK",
+    "columns": ["EMPLOYEE_ID"]
+  },
+  "foreign_keys": [
+    {
+      "constraint_name": "EMP_DEPT_FK",
+      "columns": ["DEPARTMENT_ID"],
+      "references_table": "DEPARTMENTS",
+      "references_columns": ["DEPARTMENT_ID"]
+    },
+    {
+      "constraint_name": "EMP_JOB_FK",
+      "columns": ["JOB_ID"],
+      "references_table": "JOBS",
+      "references_columns": ["JOB_ID"]
+    }
+  ],
+  "indexes": [
+    {"index_name": "EMP_EMP_ID_PK", "uniqueness": "UNIQUE",    "columns": ["EMPLOYEE_ID"]},
+    {"index_name": "EMP_DEPT_IX",   "uniqueness": "NONUNIQUE", "columns": ["DEPARTMENT_ID"]}
+  ],
+  "sequences": [
+    {"sequence_name": "EMPLOYEES_SEQ", "increment_by": 1, "last_number": 207}
+  ],
+  "triggers": [
+    {"trigger_name": "EMP_BEFORE_INSERT", "trigger_type": "BEFORE EACH ROW", "triggering_event": "INSERT", "status": "ENABLED"}
+  ],
+  "row_count": 107
+}
+```
+
+<Tip>
+  Use `apex_describe_table` before `apex_generate_crud` to confirm which columns will be detected as PK/FK and which will be skipped as audit columns. This helps you set `audit_columns` or `button_labels` overrides correctly.
+</Tip>
+
+---
+
+## `apex_detect_relationships`
+
+Auto-detects all foreign key relationships between a set of tables and suggests the best APEX component pattern for each relationship.
+
+Use this before `apex_generate_from_schema` to understand the data model and anticipate how LOVs and master-detail pages will be wired.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tables` | `list[str]` | Table names to analyze (case-insensitive) |
+
+### Example
+
+```python
+apex_detect_relationships(["EMPLOYEES", "DEPARTMENTS", "JOBS", "LOCATIONS"])
+```
+
+### Return Structure
+
+```json
+{
+  "status": "ok",
+  "tables": ["EMPLOYEES", "DEPARTMENTS", "JOBS", "LOCATIONS"],
+  "relationships": [
+    {
+      "from_table":          "EMPLOYEES",
+      "from_column":         "DEPARTMENT_ID",
+      "to_table":            "DEPARTMENTS",
+      "to_column":           "DEPARTMENT_ID",
+      "constraint_name":     "EMP_DEPT_FK",
+      "internal":            true,
+      "suggested_component": "master_detail"
+    },
+    {
+      "from_table":          "EMPLOYEES",
+      "from_column":         "JOB_ID",
+      "to_table":            "JOBS",
+      "to_column":           "JOB_ID",
+      "constraint_name":     "EMP_JOB_FK",
+      "internal":            true,
+      "suggested_component": "select_lov"
+    },
+    {
+      "from_table":          "DEPARTMENTS",
+      "from_column":         "LOCATION_ID",
+      "to_table":            "LOCATIONS",
+      "to_column":           "LOCATION_ID",
+      "constraint_name":     "DEPT_LOC_FK",
+      "internal":            true,
+      "suggested_component": "select_lov"
+    }
+  ],
+  "suggestions": [
+    "EMPLOYEES -> DEPARTMENTS: consider master-detail page (both tables in scope; EMPLOYEES is the detail side)",
+    "EMPLOYEES -> JOBS: consider select LOV on JOB_ID (both tables in scope)",
+    "DEPARTMENTS -> LOCATIONS: consider select LOV on LOCATION_ID (both tables in scope)"
+  ]
+}
+```
+
+### `suggested_component` Logic
+
+| Condition | Suggested Component |
+|-----------|-------------------|
+| Both tables in the input list AND `from_table` has more rows than `to_table` | `master_detail` |
+| Both tables in the input list AND roughly equal row counts | `select_lov` |
+| Referenced table is outside the input list | `select_lov` (external reference) |
+
+<Note>
+  `internal: true` means both sides of the FK are in your `tables` list. `internal: false` means the referenced parent table is outside the list — you may want to add it to the list or handle it separately.
+</Note>
+
+---
+
+## MCP Resources Alternative
+
+The same schema data is available as read-only MCP resources — without making a tool call. Use these in AI client contexts that support resource reads.
+
+| Resource URI | Description |
+|-------------|-------------|
+| `apex://schema/tables` | All tables in current schema (equivalent to `apex_list_tables()`) |
+| `apex://schema/tables/{table_name}` | Column metadata, PKs, and FKs for a specific table |
+| `apex://config` | Current connection status and workspace configuration |
+| `apex://session` | Active import session state — pages, regions, and items created so far |
+| `apex://apps` | APEX applications in the current workspace |
+| `apex://apps/{app_id}` | Detailed metadata and page list for a specific app |
+
+Resources are read-only and do not modify state. They are useful for AI clients to inspect current state between tool calls.
+
+---
+
+## Practical Workflow
+
+Follow this sequence when starting any new APEX app build from an existing schema:
+
+<Steps>
+  <Step title="Connect">
+    ```python
+    apex_connect()
+    ```
+  </Step>
+
+  <Step title="Discover Tables">
+    ```python
+    apex_list_tables()
+    # → Returns all tables with row counts and column summaries
+    ```
+  </Step>
+
+  <Step title="Inspect a Specific Table">
+    ```python
+    apex_describe_table("EMPLOYEES")
+    # → Returns full column detail, PK, FKs, indexes, sequences, triggers
+    ```
+  </Step>
+
+  <Step title="Detect Relationships">
+    ```python
+    apex_detect_relationships(["EMPLOYEES", "DEPARTMENTS", "JOBS"])
+    # → Returns FK map with suggested_component for each relationship
+    ```
+  </Step>
+
+  <Step title="Generate the Application">
+    ```python
+    apex_create_app(app_id=300, app_name="HR Suite")
+    
+    apex_generate_from_schema(
+        tables=["EMPLOYEES", "DEPARTMENTS", "JOBS"],
+        start_page_id=10,
+        include_dashboard=True,
+        nav_icon_map={
+            "EMPLOYEES":   "fa-users",
+            "DEPARTMENTS": "fa-building",
+            "JOBS":        "fa-briefcase",
+        },
+    )
+    
+    apex_finalize_app()
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Using Schema Info in Generators
+
+Schema introspection feeds directly into generator behavior:
+
+- **`apex_generate_crud`** queries `user_tab_columns`, `user_constraints`, and `user_cons_columns` internally. It uses column data types and naming conventions to infer APEX item types, and auto-creates LOVs for every FK column pointing to another table.
+
+- **`apex_detect_relationships`** results guide you in deciding whether to use `apex_add_master_detail()` (for parent-child relationships with many detail rows) or rely on the auto-generated select LOVs from `apex_generate_crud` (for lookup/reference tables).
+
+- **`apex_generate_from_schema`** runs `apex_generate_crud` for every table in your list and additionally performs a pre-scan of all FK relationships to log which LOVs will be created and which display columns will be used in each dropdown.
+
+<Tip>
+  For large schemas with many tables, use `apex_list_tables(include_columns=False)` for a quick overview, then `apex_describe_table()` only on the tables you plan to build CRUD for.
+</Tip>

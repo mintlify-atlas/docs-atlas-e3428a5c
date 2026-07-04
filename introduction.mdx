@@ -1,0 +1,82 @@
+---
+title: "apex-mcp: Oracle APEX Development via AI Assistants"
+sidebarTitle: "Introduction"
+description: "apex-mcp is an MCP server with 116 tools for Oracle APEX 24.2. Build apps, generate CRUD pages, add charts, and manage schemas through any MCP-compatible AI client."
+---
+
+**apex-mcp** is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **116 tools** for building Oracle APEX 24.2 applications through AI assistants. Instead of navigating the APEX App Builder UI — clicking through wizards to create pages, regions, and items one at a time — you describe what you want in plain language and the AI does the work. Built on FastMCP 3.x and Python 3.11+, apex-mcp connects to Oracle Autonomous Database via the `oracledb` thin driver with mTLS wallet authentication. No Oracle Instant Client required. It works with Claude Code, Claude Desktop, GPT via OpenAI Agents SDK, Google Gemini CLI, Cursor, VS Code, and any other MCP-compatible AI client.
+
+## How It Works
+
+apex-mcp creates APEX applications by generating and executing `wwv_flow_imp_page.*` PL/SQL calls directly against your Oracle database — the same internal mechanism APEX itself uses for import/export. This bypasses the App Builder UI entirely and is fully compatible with APEX 24.2.13 / Universal Theme 42. Your AI client sends a natural language prompt, apex-mcp translates it into the appropriate sequence of tool calls, and each tool generates and executes the corresponding PL/SQL.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  AI Client (Claude / GPT / Gemini / Cursor / VS Code)           │
+│                                                                  │
+│  "Create a full HR app from the EMPLOYEES table"                 │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ MCP (stdio or HTTP)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  apex-mcp server (FastMCP 3.x, Python 3.11+)                    │
+│  116 tools across 17 categories                                  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ oracledb (mTLS)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Oracle Autonomous Database 23ai                                 │
+│  wwv_flow_imp_page → APEX 24.2 App Builder                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Every app build follows a consistent lifecycle: `apex_connect()` → `apex_create_app()` → add pages, regions, items, and components → `apex_finalize_app()`. An `ImportSession` singleton tracks all cross-references (region IDs, item names, page sequences) so tools can resolve dependencies automatically. Tools respect **dry-run mode** (log PL/SQL without executing) and **batch mode** (queue multiple statements for a single database round-trip).
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="116 Tools, 17 Categories" icon="grid-2">
+    Full coverage from connection management and schema introspection through page creation, component assembly, chart generation, JavaScript injection, DevOps exports, and user management. Every APEX concept is a first-class tool.
+  </Card>
+  <Card title="High-Level Generators" icon="wand-magic-sparkles">
+    `apex_generate_from_schema` builds a complete app from a list of tables — CRUD pages, dashboard, and navigation — in one call. `apex_generate_crud`, `apex_generate_dashboard`, `apex_generate_wizard`, and `apex_generate_modal_form` handle common patterns without manual assembly.
+  </Card>
+  <Card title="20 UI Components + 10 Chart Types" icon="chart-pie">
+    Rich HTML components (hero banners, KPI rows, progress trackers, leaderboards, heatmap grids, activity streams) rendered via PL/SQL region source. Ten advanced chart types beyond basic JET charts: stacked, combo, Pareto, scatter, range, animated counters, gradient donut, and bubble.
+  </Card>
+  <Card title="Three Transport Modes" icon="network-wired">
+    **stdio** for local clients (Claude Code, Cursor, VS Code, Gemini CLI). **streamable-http** for remote or multi-client setups (OpenAI Agents SDK, Codespaces). **SSE** for clients that require Server-Sent Events. All controlled via CLI flags or environment variables.
+  </Card>
+  <Card title="Schema Introspection with FK Detection" icon="database">
+    `apex_list_tables`, `apex_describe_table` (with per-session caching), and `apex_detect_relationships` give the AI a complete picture of your database schema — including foreign key relationships — before generating any code.
+  </Card>
+  <Card title="Batch Mode + Dry-Run Mode" icon="layer-group">
+    `apex_begin_batch()` / `apex_commit_batch()` queue multiple PL/SQL statements for a single database round-trip, dramatically reducing latency for large builds. `apex_dry_run_preview(enabled=True)` logs all generated PL/SQL without executing — useful for review before committing changes.
+  </Card>
+</CardGroup>
+
+## Requirements
+
+| Component | Version |
+|-----------|---------|
+| Python | 3.11+ |
+| FastMCP | 3.0.0+ |
+| oracledb | 2.0.0+ |
+| Oracle APEX | 24.2 (Universal Theme 42) |
+| Oracle DB | 19c+ (tested on ADB 23ai) |
+| Oracle Wallet | Required for mTLS connections |
+
+<Note>
+No Oracle Instant Client is required. The `oracledb` thin driver handles mTLS wallet connections natively in pure Python.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install apex-mcp, configure your Oracle credentials, connect to Claude Code, and build your first APEX app in five minutes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Full reference for all Oracle connection variables, APEX workspace settings, and optional transport configuration.
+  </Card>
+</CardGroup>

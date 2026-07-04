@@ -1,0 +1,354 @@
+---
+title: "Application Management Tools Reference"
+sidebarTitle: "Apps"
+description: "Reference for apex-mcp app management tools: create, finalize, list, delete, export, describe, dry-run preview, and undo last operation."
+---
+
+APEX applications in apex-mcp follow a three-phase lifecycle: **create** → **add components** → **finalize**. You open an import session with `apex_create_app`, populate it with pages, regions, items, and other components using the component tools, then commit everything to the database with `apex_finalize_app`. The tools on this page manage that lifecycle — creating and deleting apps, exporting them for version control, inspecting existing pages, and providing safety mechanisms like dry-run mode and undo.
+
+## App Lifecycle
+
+### apex_create_app
+
+Create a new APEX application and begin an import session. This tool scaffolds a complete application skeleton: the APEX flow, Universal Theme 42 with Redwood Light styling, an authentication scheme, a navigation menu list, a navigation bar list, and a user interface binding. After calling it, use `apex_add_page` and component tools to populate the app, then always call `apex_finalize_app` when done.
+
+<ParamField path="app_id" type="integer" required>
+  Numeric application ID (e.g., `200`). Must not conflict with an existing application in the workspace. IDs below 100 are typically reserved by Oracle; use 100 or higher.
+</ParamField>
+
+<ParamField path="app_name" type="string" required>
+  Display name shown in the APEX header bar (e.g., `"Employee Directory"`). Also used to auto-generate the URL alias if `app_alias` is not provided.
+</ParamField>
+
+<ParamField path="app_alias" type="string">
+  URL-friendly alias for the application (e.g., `"EMP-DIR"`). Auto-generated from `app_name` (uppercased, spaces replaced with `-`) if omitted.
+</ParamField>
+
+<ParamField path="login_page" type="integer" default="101">
+  Page ID for the login page. Default is `101`, which is the APEX convention.
+</ParamField>
+
+<ParamField path="home_page" type="integer" default="1">
+  Page ID for the home/dashboard page. The app's navigation will point here after login.
+</ParamField>
+
+<ParamField path="schema" type="string" default="$APEX_SCHEMA">
+  Database schema that owns the application. Defaults to the `APEX_SCHEMA` environment variable.
+</ParamField>
+
+<ParamField path="language" type="string" default="en">
+  Primary language code for the application. Common values: `"en"` (English), `"pt-br"` (Brazilian Portuguese), `"es"` (Spanish), `"fr"` (French), `"de"` (German).
+</ParamField>
+
+<ParamField path="date_format" type="string" default="DD/MM/YYYY">
+  Oracle date display format. Common values: `"MM/DD/YYYY"` (US), `"DD/MM/YYYY"` (EU/BR), `"YYYY-MM-DD"` (ISO).
+</ParamField>
+
+<ParamField path="auth_type" type="string" default="NATIVE_APEX_ACCOUNTS">
+  Authentication scheme type. Options:
+  - `"NATIVE_APEX_ACCOUNTS"` — APEX built-in user accounts (default)
+  - `"NATIVE_CUSTOM_AUTH"` — Custom PL/SQL authentication function
+  - `"NATIVE_DAD"` — Database Access Descriptor
+  - `"NATIVE_LDAP"` — LDAP directory authentication
+</ParamField>
+
+<ParamField path="theme_style" type="string" default="REDWOOD_LIGHT">
+  Universal Theme 42 visual style. Options: `"REDWOOD_LIGHT"` (modern Oracle Redwood design, default), `"VITA"` (classic light), `"VITA_SLATE"` (dark navigation), `"VITA_DARK"` (full dark), `"SUMMIT"`.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `app_name`, `home_page`, a `next_step` hint, and a `log` array of operations performed. May include a `warning` if `home_page` has not yet been registered (remind you to call `apex_add_page` for it).
+
+**Example:**
+
+```python
+# Minimal — creates app 200 with all defaults
+apex_connect()
+apex_create_app(app_id=200, app_name="Employee Directory")
+
+# Full options
+apex_create_app(
+    app_id=300,
+    app_name="Sales Dashboard",
+    home_page=1,
+    login_page=101,
+    language="en",
+    date_format="MM/DD/YYYY",
+    auth_type="NATIVE_APEX_ACCOUNTS",
+    theme_style="VITA_SLATE"
+)
+```
+
+<Warning>
+  Always call `apex_finalize_app()` after adding all pages and components. Without finalization, the application is not committed to the database and will not appear in APEX. If something goes wrong mid-session, the partial import is automatically rolled back.
+</Warning>
+
+---
+
+### apex_finalize_app
+
+Finalize and commit the current APEX application import session. Calls `wwv_flow_imp.import_end` and commits the transaction. **This must always be the last call after all pages and components have been added.**
+
+This tool takes no parameters.
+
+**Returns:** JSON with `status`, `app_id`, a human-readable `message`, the `apex_url` to access the application (e.g., `f?p=200`), and a `summary` of everything created in the session.
+
+```json
+{
+  "status": "ok",
+  "app_id": 200,
+  "message": "Application Employee Directory (ID 200) finalized successfully.",
+  "apex_url": "f?p=200",
+  "summary": {
+    "pages": 4,
+    "regions": 9,
+    "items": 18,
+    "buttons": 6,
+    "processes": 3
+  }
+}
+```
+
+**Example:**
+
+```python
+apex_create_app(app_id=200, app_name="My App")
+apex_add_page(1, "Dashboard")
+apex_add_page(101, "Login", page_type="login")
+# ... add regions, items, etc. ...
+apex_finalize_app()   # commits everything
+```
+
+<Note>
+  After finalization, access the app at the APEX base URL + the returned `apex_url`. For example, if your APEX URL is `https://mydb.adb.region.oraclecloudapps.com/ords/`, the app is at `https://mydb.adb.region.oraclecloudapps.com/ords/f?p=200`.
+</Note>
+
+---
+
+## App Management
+
+### apex_list_apps
+
+List all APEX applications in the current workspace. Use this to discover existing app IDs before creating new ones or before using inspect/edit tools.
+
+This tool takes no parameters. Requires an active database connection.
+
+**Returns:** JSON with `status`, `count`, and a `data` array where each entry includes:
+- `APPLICATION_ID` — numeric app ID
+- `APPLICATION_NAME` — display name
+- `ALIAS` — URL alias
+- `STATUS` — availability status (e.g., `"Available with Edit Link"`)
+- `PAGES` — total page count
+- `LAST_UPDATED_ON` — date of last modification (`YYYY-MM-DD`)
+- `OWNER` — schema owner
+
+**Example:**
+
+```python
+apex_connect()
+apex_list_apps()
+# Returns list of all apps → pick an app_id to work with
+```
+
+---
+
+### apex_delete_app
+
+Permanently delete an APEX application and all its components. This action removes all pages, regions, items, processes, shared components, authentication schemes, and navigation lists associated with the application.
+
+<ParamField path="app_id" type="integer" required>
+  The numeric application ID to delete.
+</ParamField>
+
+**Returns:** JSON with `status` and a confirmation `message`.
+
+**Example:**
+
+```python
+apex_delete_app(app_id=200)
+```
+
+<Warning>
+  This operation is **permanent and cannot be undone**. Export the application first with `apex_export_app` if you need a backup. The tool is annotated `_DELETE`, which means AI clients will prompt for explicit user confirmation before executing.
+</Warning>
+
+---
+
+### apex_export_app
+
+Export an APEX application as a complete SQL install script in `wwv_flow_imp` format, compatible with APEX 24.2. The exported SQL can be version-controlled in git and re-imported via SQLcl, APEX SQL Workshop, or the import tool to recreate the application on any APEX instance.
+
+<ParamField path="app_id" type="integer" required>
+  Numeric application ID to export (e.g., `200`).
+</ParamField>
+
+<ParamField path="output_path" type="string" default="">
+  Full file path where the SQL export should be saved (e.g., `"C:/myproject/apex/f200.sql"`). If empty, only a 500-character content preview is returned in the JSON response — no file is written.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `file_name` (e.g., `"f200.sql"`), `content_size_chars`, `content_preview` (first 500 chars, always included), and optionally `saved_to` and `message` when `output_path` is provided.
+
+**Examples:**
+
+```python
+# Save full export to disk
+apex_export_app(app_id=200, output_path="C:/myproject/apex/f200.sql")
+
+# Preview only (no file written)
+apex_export_app(app_id=200)
+```
+
+<Note>
+  The export uses Oracle APEX's built-in `apex_export.get_application()` function, which requires `EXECUTE` privilege on the `apex_export` package. The schema user must be the workspace owner or have equivalent grants.
+</Note>
+
+---
+
+### apex_describe_page
+
+Get a structured, human-readable summary of all components on an existing APEX page. Designed to give an AI a clear picture of page structure before modifying it.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID containing the page.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID to describe.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, and the following sections:
+- `page` — metadata: `page_id`, `page_name`, `page_template`, `page_mode`, `authorization_scheme`
+- `regions` — list of regions with `region_name`, `region_type`, `display_sequence`, `source_type`, and a truncated `region_source` (first 200 chars)
+- `items` — list of items with `item_name`, `item_type`, `display_sequence`, `label`, `lov_definition`
+- `buttons` — list of buttons with `button_name`, `label`, `button_action`, `button_position`
+- `processes` — list of processes with `process_name`, `process_type`, `process_point`
+- `dynamic_actions` — list of dynamic actions with `dynamic_action_name`, `triggering_event`
+- `summary` — counts of each component type
+
+**Example:**
+
+```python
+# Understand what's on page 10 before editing it
+apex_describe_page(app_id=200, page_id=10)
+```
+
+---
+
+## Development Utilities
+
+### apex_dry_run_preview
+
+Toggle dry-run mode for all apex-mcp tools. When enabled, all subsequent calls that write to the database (PL/SQL executions) are intercepted and logged but **not executed**. Use this to preview the exact PL/SQL that would be generated before committing.
+
+<ParamField path="enabled" type="boolean" default="true">
+  `True` to enable dry-run mode (log PL/SQL without executing). `False` to disable dry-run and return the accumulated PL/SQL log.
+</ParamField>
+
+**Returns:** 
+- When enabling: JSON with `status`, `mode: "dry_run_enabled"`, and a `message`.
+- When disabling: JSON with `status`, `mode: "dry_run_disabled"`, `statements_count`, a `plsql_log` array of all captured statements, and a `message`.
+
+**Example:**
+
+```python
+# Start dry-run
+apex_dry_run_preview(True)
+
+# These calls are logged but NOT executed
+apex_add_page(5, "Test Page")
+apex_add_region(5, "My Report", "IR", sql="SELECT * FROM employees")
+
+# Stop dry-run and retrieve the captured PL/SQL
+result = apex_dry_run_preview(False)
+# result["plsql_log"] contains the PL/SQL statements that would have run
+```
+
+<Note>
+  Dry-run mode affects all tools that call PL/SQL under the hood — `apex_add_page`, `apex_add_region`, `apex_add_item`, and all other component tools. It does not affect read-only tools like `apex_list_apps` or `apex_run_sql`.
+</Note>
+
+---
+
+### apex_undo_last
+
+Undo the last N component creations by deleting them from the database in reverse order (LIFO). Only works during an active import session (between `apex_create_app` and `apex_finalize_app`).
+
+<ParamField path="steps" type="integer" default="1">
+  Number of components to undo. Defaults to `1` (undo only the most recent component). Capped at the total number of tracked components in the session.
+</ParamField>
+
+**Returns:** JSON with `status`, an `undone` array (each entry has `type`, `id`, and `status`), and `remaining_tracked` count.
+
+```json
+{
+  "status": "ok",
+  "undone": [
+    { "type": "region", "id": 12345678, "status": "deleted" }
+  ],
+  "remaining_tracked": 5
+}
+```
+
+**Example:**
+
+```python
+# Undo the last region that was added
+apex_undo_last()
+
+# Undo the last 3 components
+apex_undo_last(steps=3)
+```
+
+<Note>
+  The session tracks every region, item, button, process, page, and dynamic action created since `apex_create_app`. `apex_undo_last` uses this log to identify and delete components in the correct reverse order. After `apex_finalize_app`, the session is closed and undo is no longer available.
+</Note>
+
+---
+
+## Validation and Comparison
+
+### apex_validate_app
+
+Validate an APEX application structure and return any errors or warnings. Checks for common issues including pages without regions, select-list items without LOVs, broken page references, and more. Returns a score from 0–100.
+
+<ParamField path="app_id" type="integer">
+  Application ID to validate. If omitted, uses the current active session app.
+</ParamField>
+
+**Returns:** JSON with validation results including `errors` list, `warnings` list, and a numeric `score` (100 = no issues).
+
+**Example:**
+
+```python
+# Validate after finalization
+apex_finalize_app()
+apex_validate_app(app_id=200)
+
+# Validate current session before finalizing
+apex_validate_app()
+```
+
+---
+
+### apex_diff_app
+
+Compare two APEX applications and return a structural diff. Useful for tracking changes between development, staging, and production environments, or comparing app versions side by side.
+
+<ParamField path="app_id_1" type="integer" required>
+  First application ID (base/reference).
+</ParamField>
+
+<ParamField path="app_id_2" type="integer" required>
+  Second application ID (compare target).
+</ParamField>
+
+**Returns:** JSON with summaries for both apps and a `diff` object containing:
+- `pages` — `only_in_app_1`, `only_in_app_2`, `in_both` arrays
+- `regions` — `only_in_app_1`, `only_in_app_2` arrays (each entry: `{page_id, region_name}`), plus `in_both_count`
+- `items` — same structure as regions
+
+**Example:**
+
+```python
+# Compare dev (200) vs. production (201)
+apex_diff_app(app_id_1=200, app_id_2=201)
+```

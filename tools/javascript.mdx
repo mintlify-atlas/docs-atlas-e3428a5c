@@ -1,0 +1,270 @@
+---
+title: "JavaScript and CSS Tools Reference"
+sidebarTitle: "JavaScript & CSS"
+description: "Reference for apex-mcp JavaScript and CSS tools: add inline page JS, global JS via Page 0, page CSS, global CSS, and generate AJAX callback processes."
+---
+
+apex-mcp provides tools to add JavaScript and CSS to APEX pages programmatically, using APEX's built-in code slots and hidden PL/SQL regions that output `<script>` and `<style>` tags via `sys.htp.p()`. This approach integrates cleanly with APEX's rendering pipeline and avoids the need to manually navigate the App Builder UI for each page.
+
+<Note>
+  **CSP compliance in APEX 24.2:** Inline scripts added via `apex_add_page_js` and `apex_add_global_js` are injected through hidden APEX PL/SQL regions. In APEX 24.2 deployments with Content Security Policy (CSP) enabled, these regions are rendered within the APEX page template's inline-code slots and receive automatic CSP nonces — no manual nonce management required.
+</Note>
+
+---
+
+## Page-Level JavaScript
+
+### `apex_add_page_js`
+
+Add inline JavaScript to a specific page. The code runs after the page DOM is ready and has full access to the APEX JavaScript API (`apex`, `$`, `apex.item()`, `apex.region()`, etc.).
+
+Internally, apex-mcp creates a hidden `NATIVE_PLSQL` region at display sequence 9999 (bottom of BODY) that calls `sys.htp.p()` to output a `<script>` tag containing your code.
+
+<ParamField path="page_id" type="integer" required>
+  Target page ID. The page must exist in the current import session (added via `apex_add_page()`).
+</ParamField>
+
+<ParamField path="javascript_code" type="string" required>
+  JavaScript code to inject. Placed inside a `<script type="text/javascript">` tag at the bottom of the page body.
+</ParamField>
+
+<ParamField path="js_file_urls" type="string" default='""'>
+  Newline-separated URLs of external JS files to load before the inline code. Supports APEX substitution strings such as `#APP_FILES#`. Example: `"#APP_FILES#mylib.js"`.
+</ParamField>
+
+**Returns:** JSON with `status`, `page_id`, `region_id`, `message`, and `has_file_urls` (boolean).
+
+```javascript Example — page-level JS
+// apex_add_page_js(page_id=10, javascript_code=...)
+
+function initProductsPage() {
+    // Use APEX JS API — not raw jQuery selectors
+    apex.item("P10_SEARCH").setValue("");
+
+    apex.region("products-report").refresh();
+
+    apex.message.showPageSuccess("Products page ready.");
+}
+
+apex.jQuery(document).ready(function() {
+    initProductsPage();
+});
+```
+
+**APEX JavaScript API quick reference:**
+
+| Expression | Description |
+|------------|-------------|
+| `apex.item('ITEM').getValue()` | Get item value |
+| `apex.item('ITEM').setValue('val')` | Set item value |
+| `apex.item('ITEM').show() / .hide()` | Show or hide an item |
+| `apex.item('ITEM').enable() / .disable()` | Enable or disable an item |
+| `apex.region('REGION_ID').refresh()` | Refresh a region |
+| `apex.message.showPageSuccess('Saved!')` | Display success toast |
+| `apex.message.showErrors([{message:'Err'}])` | Display error notification |
+
+---
+
+## Global JavaScript
+
+### `apex_add_global_js`
+
+Add a reusable JavaScript module that is available across the entire application. Because truly global JS must be delivered via a static file loaded in every page, this tool generates the prepared JavaScript content and provides step-by-step upload instructions for APEX Static Application Files.
+
+The generated code is automatically wrapped in an IIFE (`(function() { 'use strict'; ... })()`) to avoid polluting the global scope, unless your code already starts with an IIFE, `var`, `let`, or `const`.
+
+<ParamField path="function_name" type="string" required>
+  Identifier/label for the module, e.g. `"APP_UTILS"`. Used as a comment header and to derive the suggested filename (`app-utils.js`).
+</ParamField>
+
+<ParamField path="javascript_code" type="string" required>
+  The full JavaScript code. Can contain multiple function definitions.
+</ParamField>
+
+<ParamField path="description" type="string" default='""'>
+  Human-readable description included in the file header comment.
+</ParamField>
+
+**Returns:** JSON with `status`, `function_name`, `filename`, `description`, `js_content` (prepared code ready to upload), `upload_instructions` (step-by-step list), and `reference_url` (e.g. `#APP_FILES#app-utils.js`).
+
+<Note>
+  **Quick alternative:** Call `apex_add_page_js(page_id=0, javascript_code=...)` to add JavaScript directly to the Global Page (Page 0). This is simpler but slightly less efficient than a static file because the code is rendered server-side on every request rather than cached by the browser.
+</Note>
+
+```text Upload instructions (returned in response)
+1. In APEX Builder, go to Shared Components > Files and Reports > Static Application Files.
+2. Click 'Upload File' and upload a file named 'app-utils.js' with the JS content provided.
+3. Copy the 'Reference' path shown after upload (e.g., '#APP_FILES#app-utils.js').
+4. Go to App Properties > User Interface > Attributes > JavaScript > File URLs.
+5. Add '#APP_FILES#app-utils.js' on a new line in File URLs.
+6. Save and run the application — the JS will be available on all pages.
+```
+
+---
+
+## AJAX Callback Processes
+
+### `apex_generate_ajax_handler`
+
+Create a server-side AJAX callback process and generate the matching client-side JavaScript caller function. By default (`auto_add_js=True`), the generated JavaScript is automatically added to the page via `apex_add_page_js()` so it is immediately available at runtime.
+
+The server-side process is registered as an `ON_DEMAND` `NATIVE_PLSQL` process, callable from client JavaScript via `apex.server.process()`. If your PL/SQL does not include an `EXCEPTION` block and `return_json=True`, one is injected automatically to return a JSON error object on failure.
+
+<ParamField path="page_id" type="integer" required>
+  Page that owns this AJAX callback. The page must exist in the current import session.
+</ParamField>
+
+<ParamField path="callback_name" type="string" required>
+  UPPERCASE name for the callback (e.g., `"SAVE_RECORD"`, `"SEARCH_DATA"`). Called from client-side JS as `apex.server.process('CALLBACK_NAME', {...})`. See the naming convention note below.
+</ParamField>
+
+<ParamField path="plsql_code" type="string" required>
+  PL/SQL block that runs server-side. Access page item values via bind variables (`:P10_ITEM_NAME`). Return data to the client using the `apex_json` package.
+</ParamField>
+
+<ParamField path="input_items" type="string[]">
+  List of page item names to submit with the AJAX request, e.g. `["P10_SEARCH", "P10_STATUS"]`. These are sent as `pageItems` in the `apex.server.process()` call and become available as bind variables in the PL/SQL.
+</ParamField>
+
+<ParamField path="return_json" type="boolean" default="true">
+  Whether the callback returns JSON via `apex_json`. Set to `False` for plain-text responses.
+</ParamField>
+
+<ParamField path="auto_add_js" type="boolean" default="true">
+  Automatically add the generated JavaScript caller function to the page via `apex_add_page_js()`. Set to `False` to review and modify the generated JS before adding it manually.
+</ParamField>
+
+**Returns:** JSON with `status`, `page_id`, `callback_name`, `process_id`, `process_created`, `javascript_caller` (the generated JS function), `usage_example`, `js_auto_added`, and `js_add_error`.
+
+<Note>
+  **UPPERCASE naming convention:** Callback names must be UPPERCASE (e.g. `SAVE_RECORD`, not `saveRecord`). The generated JavaScript caller function is automatically converted to camelCase — `SAVE_RECORD` becomes `callSaveRecord()`.
+</Note>
+
+### AJAX Handler Example
+
+```plsql Server-side PL/SQL (plsql_code parameter)
+DECLARE
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count
+      FROM products
+     WHERE status = :P10_STATUS
+       AND UPPER(product_name) LIKE '%' || UPPER(:P10_SEARCH) || '%';
+
+    apex_json.open_object;
+    apex_json.write('count', v_count);
+    apex_json.write('status', 'success');
+    apex_json.close_object;
+EXCEPTION
+    WHEN OTHERS THEN
+        apex_json.open_object;
+        apex_json.write('status', 'error');
+        apex_json.write('error', SQLERRM);
+        apex_json.close_object;
+END;
+```
+
+```javascript Generated JavaScript caller (returned in javascript_caller field)
+function callSearchProducts() {
+    apex.server.process(
+        'SEARCH_PRODUCTS',
+        {
+            pageItems: '#P10_SEARCH,#P10_STATUS',
+        },
+        {
+            dataType: 'json',
+            success: function(data) {
+                // data is parsed JSON from apex_json response
+                if (data.status === 'error') {
+                    apex.message.showErrors([{type: 'error', message: data.error}]);
+                } else {
+                    apex.message.showPageSuccess('Done!');
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                apex.message.showErrors([{type: 'error', message: errorThrown}]);
+            }
+        }
+    );
+}
+```
+
+```javascript Calling the generated handler from a Dynamic Action or button
+// Call from a Dynamic Action (Execute JavaScript Code action):
+callSearchProducts();
+
+// Or from a button click handler:
+apex.jQuery('#SEARCH_BUTTON').on('click', function() {
+    callSearchProducts();
+});
+
+// Manual apex.server.process() — equivalent to the generated function:
+apex.server.process(
+    'SEARCH_PRODUCTS',
+    { pageItems: '#P10_SEARCH,#P10_STATUS' },
+    {
+        success: function(data) { console.log(data); },
+        error:   function(jqXHR, textStatus, errorThrown) { console.error(errorThrown); }
+    }
+);
+```
+
+---
+
+## Page-Level CSS
+
+### `apex_add_page_css`
+
+Add inline CSS to a specific page. The CSS is injected via a hidden `NATIVE_PLSQL` region (display sequence 1, BODY position) that calls `sys.htp.p()` to output a `<style>` tag.
+
+<ParamField path="page_id" type="integer" required>
+  Target page ID. The page must exist in the current import session.
+</ParamField>
+
+<ParamField path="css_code" type="string" required>
+  CSS rules to inject. Scoped to this page only.
+</ParamField>
+
+**Returns:** JSON with `status`, `page_id`, and `message`.
+
+<Warning>
+  If `apex_add_page_css()` is called multiple times for the same page, each call adds a new region. Concatenate all page-specific CSS into a single call for best results.
+</Warning>
+
+```css Example — style a specific region
+.my-region { border: 2px solid #00995D; border-radius: 8px; }
+.my-region .t-Region-header { background: #00995D; color: #fff; }
+.my-region .t-Region-body { padding: 16px; }
+```
+
+---
+
+## Global CSS
+
+### `apex_add_global_css`
+
+Add CSS that applies to **all pages** by creating a hidden `NATIVE_PLSQL` region on the APEX Global Page (Page 0). Page 0 is created automatically if it does not already exist in the current import session.
+
+Use this tool for application-wide branding, Universal Theme 42 CSS variable overrides, and shared component styles that would otherwise need to be repeated on every page.
+
+<ParamField path="css_code" type="string" required>
+  CSS rules to apply globally. Rendered inside a `<style>` tag at the BODY position on every page.
+</ParamField>
+
+**Returns:** JSON with `status`, `page_0_created` (boolean — whether Page 0 was created by this call), `region_id`, and `message`.
+
+<Note>
+  Calling `apex_add_global_css()` multiple times adds multiple CSS regions on Page 0. Concatenate all global CSS into a single call for best results.
+</Note>
+
+```css Example — Universal Theme 42 brand overrides
+/* Override primary colour token */
+:root { --ut-palette-primary: #00995D; }
+
+/* Hot button accent */
+.t-Button--hot { background: #00995D !important; border-color: #007a4d !important; }
+
+/* Navigation bar */
+.t-Header { background: #00995D !important; }
+.t-NavigationBar .t-Button { color: #fff; }
+```

@@ -1,0 +1,211 @@
+---
+title: "Connection and SQL Tools Reference"
+sidebarTitle: "Connection & SQL"
+description: "Reference for apex_connect, apex_run_sql, and apex_status — the three tools that establish and inspect your Oracle ADB connection in apex-mcp."
+---
+
+Before any apex-mcp tool can interact with Oracle APEX, you must have an active database connection. `apex_connect`, `apex_run_sql`, and `apex_status` are the three foundational tools that form the connection layer. Every other tool — app creation, page management, component generation — depends on `apex_connect` having been called successfully first. Think of them as the mandatory preamble to every apex-mcp session: connect, optionally verify, then build.
+
+## Connection Tools
+
+### apex_connect
+
+Connect to Oracle Autonomous Database via mTLS wallet. **This must be the first call in any apex-mcp session.**
+
+All five parameters are read from environment variables by default, so in most workflows you can call `apex_connect()` with no arguments. The environment variables are configured once in your `.mcp.json` file and reused across sessions.
+
+<ParamField path="user" type="string" default="$ORACLE_DB_USER">
+  Database username. Must be the APEX workspace schema owner. Defaults to the `ORACLE_DB_USER` environment variable. Required — the tool will return an error if neither the parameter nor the env var is set.
+</ParamField>
+
+<ParamField path="password" type="string" default="$ORACLE_DB_PASS">
+  Database password for the schema user. Defaults to the `ORACLE_DB_PASS` environment variable.
+</ParamField>
+
+<ParamField path="dsn" type="string" default="$ORACLE_DSN">
+  TNS alias from `tnsnames.ora` inside the wallet directory (e.g., `mydb_tp`). Defaults to the `ORACLE_DSN` environment variable. Common suffixes: `_tp` (Transaction Processing — recommended for APEX), `_high` (analytics), `_medium`, `_low`.
+</ParamField>
+
+<ParamField path="wallet_dir" type="string" default="$ORACLE_WALLET_DIR">
+  Absolute path to the directory containing the extracted Oracle wallet files. The directory must contain `tnsnames.ora`, `sqlnet.ora`, `cwallet.sso`, `ewallet.p12`, and `ojdbc.properties`. Defaults to the `ORACLE_WALLET_DIR` environment variable.
+</ParamField>
+
+<ParamField path="wallet_password" type="string" default="$ORACLE_WALLET_PASSWORD">
+  Password used to decrypt the wallet. This is the password you set when downloading the wallet from OCI Console. Defaults to the `ORACLE_WALLET_PASSWORD` environment variable.
+</ParamField>
+
+**Returns:** JSON object with `status` (`"ok"` or `"error"`) and a `message` containing the Oracle version string on success.
+
+```json
+// Success
+{ "status": "ok", "message": "Connected to Oracle Database 23ai ..." }
+
+// Error — missing env vars
+{
+  "status": "error",
+  "error": "Missing required parameters: user / ORACLE_DB_USER, wallet_dir / ORACLE_WALLET_DIR. Set them via environment variables or pass directly. Call apex_setup_guide() for full configuration instructions."
+}
+```
+
+**Example — env-var driven (recommended):**
+
+```python
+# Reads all credentials from environment variables set in .mcp.json
+apex_connect()
+```
+
+**Example — explicit credentials (testing/override):**
+
+```python
+apex_connect(
+    user="MY_SCHEMA",
+    password="MySecurePass@2024",
+    dsn="mydb_tp",
+    wallet_dir="/path/to/wallet",
+    wallet_password="wallet_pass"
+)
+```
+
+<Note>
+  On successful connection, apex-mcp automatically queries the live database to discover Universal Theme 42 template IDs for your workspace. This means template IDs are always calibrated to your specific APEX instance — you don't need to configure them manually.
+</Note>
+
+<Warning>
+  mTLS is required for Oracle Autonomous Database. Direct TLS mode (without a wallet) is not supported by apex-mcp. Always download and extract the full wallet ZIP from OCI Console before calling `apex_connect`.
+</Warning>
+
+---
+
+### apex_run_sql
+
+Execute any SQL SELECT statement or PL/SQL anonymous block against the connected database. This is the general-purpose SQL escape hatch — useful for inspecting data, running ad-hoc queries, or executing PL/SQL operations outside the APEX import session.
+
+<ParamField path="sql" type="string" required>
+  A SQL `SELECT` statement, a `WITH` CTE query, or a PL/SQL anonymous block (`BEGIN...END`). The tool detects the statement type automatically:
+  - `SELECT` / `WITH` → returns rows as a JSON array.
+  - Anything else → executed as PL/SQL, returns `"OK"` or an error message.
+</ParamField>
+
+<ParamField path="max_rows" type="integer" default="100">
+  Maximum number of rows to return for SELECT queries. Capped at 1000 regardless of the value passed. Has no effect on PL/SQL blocks.
+</ParamField>
+
+<ParamField path="bind_params" type="object" default="null">
+  Dictionary of bind variables for parameterized queries. Use `:variable_name` placeholders in the SQL and pass the corresponding values here. Strongly recommended when user input is involved to prevent SQL injection.
+  
+  Example: `bind_params={"id": 42, "name": "Alice"}`
+</ParamField>
+
+**Returns:** For SELECT queries — a JSON object with `status`, `rows` (array of row objects), and `count`. For PL/SQL — a JSON object with `status` and `message`.
+
+```json
+// SELECT result
+{
+  "status": "ok",
+  "rows": [
+    { "TABLE_NAME": "EMPLOYEES" },
+    { "TABLE_NAME": "DEPARTMENTS" }
+  ],
+  "count": 2
+}
+
+// PL/SQL result
+{ "status": "ok", "message": "PL/SQL executed successfully." }
+```
+
+**Examples:**
+
+```python
+# List tables in the schema
+apex_run_sql("SELECT table_name FROM user_tables ORDER BY 1")
+
+# Preview data with a row limit
+apex_run_sql("SELECT * FROM tea_beneficiarios WHERE rownum <= 5")
+
+# Parameterized query — safe for user-supplied values
+apex_run_sql(
+    "SELECT * FROM employees WHERE dept_id = :dept AND status = :st",
+    bind_params={"dept": 10, "st": "ACTIVE"}
+)
+
+# PL/SQL anonymous block
+apex_run_sql("BEGIN dbms_output.put_line('hello'); END;")
+```
+
+<Note>
+  `apex_run_sql` requires an active connection. If called before `apex_connect`, it returns `{"status": "error", "error": "Not connected. Call apex_connect() first."}`.
+</Note>
+
+<Warning>
+  `apex_run_sql` is annotated `_READ_OPEN` (`openWorldHint: true`), which signals to AI clients that it can reach external or open-ended data. Some clients may prompt for confirmation before running DML or PL/SQL statements via this tool.
+</Warning>
+
+---
+
+### apex_status
+
+Return the current MCP session state: database connection status, Oracle version, and a summary of everything created so far in the active import session.
+
+This tool takes no parameters.
+
+**Returns:** JSON object with:
+- `connected` (bool) — whether a database connection is active.
+- `db_version` (string) — Oracle version banner (e.g., `"Oracle Database 23ai Enterprise Edition..."`), only present when connected.
+- `session` (object) — summary of the current import session: `app_id`, `app_name`, `import_begun`, `import_ended`, plus counts of pages, regions, items, buttons, processes, LOVs, and dynamic actions created.
+
+```json
+{
+  "connected": true,
+  "db_version": "Oracle Database 23ai Enterprise Edition Release 23.0.0.0.0",
+  "session": {
+    "app_id": 200,
+    "app_name": "My App",
+    "import_begun": true,
+    "import_ended": false,
+    "pages": 3,
+    "regions": 7,
+    "items": 12,
+    "buttons": 4,
+    "processes": 2,
+    "lovs": 1,
+    "dynamic_actions": 0
+  }
+}
+```
+
+**Example:**
+
+```python
+# Check state before adding more components
+apex_status()
+
+# Typical use: verify connection at session start
+apex_connect()
+apex_status()   # confirm connected=true and session is empty
+```
+
+<Note>
+  Call `apex_status()` whenever you need to understand how far along a build session is — for example, after resuming a conversation or before calling `apex_finalize_app()` to confirm all expected components are present.
+</Note>
+
+---
+
+## Tool Annotations Reference
+
+apex-mcp decorates every tool with MCP annotations that tell AI clients how to handle each tool safely. Understanding these annotations helps explain why some tools run automatically while others prompt for confirmation.
+
+| Annotation | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` | AI Client Behavior |
+|---|---|---|---|---|---|
+| `_READ` | `true` | `false` | `true` | `false` | Auto-approved. Safe to call freely; only reads data, same input always produces same result, scoped to the workspace. |
+| `_READ_OPEN` | `true` | `false` | `true` | `true` | Usually auto-approved but may prompt in strict clients; reads data that could span open/external resources (e.g., arbitrary SQL). |
+| `_SAFE` | `false` | `false` | `true` | `false` | Auto-approved. Writes or has side effects, but is idempotent — calling it twice is safe (e.g., `apex_connect`, `apex_refresh_templates`). |
+| `_WRITE` | `false` | `false` | `false` | `false` | May prompt for confirmation. Creates or modifies data; not idempotent, but not destructive (can be undone with `apex_undo_last` or by deleting the object). |
+| `_DELETE` | `false` | `true` | `false` | `false` | Prompts for confirmation. Permanently deletes data. In clients like Claude, `destructiveHint: true` triggers an explicit user approval step. |
+
+**Connection tool annotations:**
+
+| Tool | Annotation | Rationale |
+|---|---|---|
+| `apex_connect` | `_SAFE` | Idempotent — calling it again just reconnects with the same credentials. |
+| `apex_run_sql` | `_READ_OPEN` | Can execute arbitrary SQL across open-ended data; `openWorldHint` signals this. |
+| `apex_status` | `_READ` | Pure read — no side effects, no writes. |

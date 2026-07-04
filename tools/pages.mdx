@@ -1,0 +1,273 @@
+---
+title: "Page Management Tools Reference"
+sidebarTitle: "Pages"
+description: "Reference for apex-mcp page tools: add pages, list pages, get details, update page properties, delete, and copy pages within an application."
+---
+
+Pages are the primary structural unit of an Oracle APEX application. Every region, item, button, and process belongs to a page. apex-mcp provides tools to add pages to a new app during an import session, list pages in existing apps, inspect their full component tree, update page-level properties, delete pages, and copy pages within or across applications. Page management tools work in two modes: **session mode** (during an active `apex_create_app` import session) and **live mode** (operating on already-finalized, existing apps).
+
+## Creating Pages
+
+### apex_add_page
+
+Add a new page to the current APEX application import session. Must be called after `apex_create_app` and before `apex_finalize_app`.
+
+<ParamField path="page_id" type="integer" required>
+  Numeric page ID (e.g., `1`, `10`, `101`). Page `0` is the global page — its components appear on every page. Cannot reuse a page ID that already exists in the current session; use `apex_delete_page` first or choose a different ID.
+</ParamField>
+
+<ParamField path="page_name" type="string" required>
+  Display name for the page, shown in the APEX page title and browser tab (e.g., `"Dashboard"`, `"User List"`).
+</ParamField>
+
+<ParamField path="page_type" type="string" default="blank">
+  Type of page, which controls the template and layout applied:
+  - `"blank"` — empty page (default); add your own regions with `apex_add_region`
+  - `"report"` — Interactive Report page template
+  - `"form"` — form page template
+  - `"login"` — login page (centered layout, no navigation bar)
+  - `"dashboard"` — dashboard with card layout
+  - `"modal"` — modal dialog page (`p_page_mode=MODAL`)
+  - `"global"` — page 0 (global page applied to all pages); also auto-creates a standard container region
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Name of an authorization scheme to restrict access to this page (e.g., `"IS_ADMIN"`). Leave empty for public access. Corresponds to `p_required_role` in the APEX import API.
+</ParamField>
+
+<ParamField path="page_template" type="string">
+  Override the page template with a specific template name. Leave empty to use the default template for the selected `page_type`.
+</ParamField>
+
+<ParamField path="help_text" type="string" default="">
+  Optional help text displayed to users on this page.
+</ParamField>
+
+**Returns:** JSON with `status`, `page_id`, `page_name`, `page_type`, `is_public` (`"Y"` or `"N"`), and the `auth_scheme` applied.
+
+**Examples:**
+
+```python
+# Blank page for a dashboard
+apex_add_page(1, "Dashboard")
+
+# Login page (always page 101 by APEX convention)
+apex_add_page(101, "Login", page_type="login")
+
+# Modal dialog page for a detail form
+apex_add_page(20, "Edit Employee", page_type="modal")
+
+# Access-controlled admin page
+apex_add_page(50, "Admin Settings", auth_scheme="IS_ADMIN")
+
+# Global page — components here appear on every page
+apex_add_page(0, "Global Page", page_type="global")
+```
+
+<Note>
+  Best practice for page ID numbering: use logical groups to keep the app organized. For example: `1–9` for dashboard/home pages, `10–19` for first entity (list + form), `20–29` for second entity, `100–109` for admin pages, `101` for login.
+</Note>
+
+<Warning>
+  If you specify a `home_page` in `apex_create_app` that is different from `1`, you will receive a warning in the response reminding you to call `apex_add_page(home_page, ...)` before `apex_finalize_app`. A missing home page causes an HTTP 404 after login.
+</Warning>
+
+---
+
+## Listing and Inspecting Pages
+
+### apex_list_pages
+
+List all pages in an APEX application. Works both during an active import session (uses session `app_id`) and against any existing app in the workspace.
+
+<ParamField path="app_id" type="integer">
+  Application ID to query. If omitted, uses the `app_id` from the current active import session. Required if called outside a session.
+</ParamField>
+
+**Returns:** JSON with `status`, `count`, and a `data` array where each entry includes:
+- `PAGE_ID` — numeric page ID
+- `PAGE_NAME` — page display name
+- `PAGE_MODE` — `"Normal"` or `"Modal Dialog"`
+- `AUTHORIZATION_SCHEME` — scheme name, or empty for public pages
+- `CREATED_ON` — creation timestamp (`YYYY-MM-DD HH24:MI`)
+- `UPDATED_ON` — last updated timestamp
+
+**Examples:**
+
+```python
+# List pages of the current session app
+apex_list_pages()
+
+# List pages of any existing app
+apex_list_pages(app_id=200)
+```
+
+---
+
+### apex_get_page_details
+
+Get complete details of a specific APEX page, including all components: regions, items, buttons, processes, dynamic actions, computations, and validations. Intended for thorough inspection of an existing page before editing it.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID containing the page.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID to inspect.
+</ParamField>
+
+**Returns:** JSON with `status` and the following sections:
+
+- **`page`** — page-level metadata: `page_id`, `page_name`, `page_mode`, `page_template`, `authorization_scheme`, `javascript_code`, `css_inline`, `help_text`, `reload_on_submit`, `warn_on_unsaved_changes`
+- **`regions`** — all regions with type, display sequence, source type, and source SQL/HTML
+- **`items`** — all form items with type, label, sequence, and LOV definition
+- **`buttons`** — all buttons with action, position, and condition type
+- **`processes`** — all page processes with type, point, and SQL
+- **`dynamic_actions`** — all dynamic actions with triggering event and element
+- **`summary`** — component counts for each type
+
+**Example:**
+
+```python
+# Full inspection of page 10 in app 200
+apex_get_page_details(app_id=200, page_id=10)
+```
+
+<Note>
+  `apex_get_page_details` is the deepest inspection tool — it returns everything on a page. For a lighter overview, use `apex_describe_page` (in the app tools), which truncates long SQL sources and omits less-common fields.
+</Note>
+
+---
+
+## Editing Existing Pages
+
+### apex_update_page
+
+Update page-level settings for an existing APEX page. Modifies the page record directly in the `wwv_flow_steps` internal table. At least one optional field must be provided.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID containing the page to update.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID to update.
+</ParamField>
+
+<ParamField path="new_name" type="string">
+  New page display name.
+</ParamField>
+
+<ParamField path="new_title" type="string">
+  New browser/tab title for the page.
+</ParamField>
+
+<ParamField path="new_auth_scheme" type="string">
+  New authorization scheme name. Pass an empty string (`""`) to remove the existing authorization and make the page public.
+</ParamField>
+
+<ParamField path="new_page_mode" type="string">
+  New page mode. Valid values: `"NORMAL"`, `"MODAL_DIALOG"`, `"NON_MODAL_DIALOG"`.
+</ParamField>
+
+**Returns:** JSON with `status` and the list of fields that were updated.
+
+**Examples:**
+
+```python
+# Rename a page
+apex_update_page(app_id=200, page_id=10, new_name="Employee List")
+
+# Change page to a modal dialog
+apex_update_page(app_id=200, page_id=20, new_page_mode="MODAL_DIALOG")
+
+# Restrict a previously public page
+apex_update_page(app_id=200, page_id=50, new_auth_scheme="IS_ADMIN")
+
+# Remove authorization (make public)
+apex_update_page(app_id=200, page_id=50, new_auth_scheme="")
+```
+
+<Warning>
+  `apex_update_page` requires `SELECT` and `UPDATE` privileges on the `WWV_FLOW_STEPS` internal table. If you receive `ORA-01031: insufficient privileges`, run `apex_fix_permissions()` or have your DBA grant the necessary permissions.
+</Warning>
+
+---
+
+### apex_delete_page
+
+Delete a page from an existing APEX application. All components on the page — regions, items, buttons, processes, dynamic actions, computations, and validations — are permanently removed.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID containing the page to delete.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID to delete. Cannot be `0` (the global page is protected and cannot be deleted).
+</ParamField>
+
+**Returns:** JSON with `status` and a confirmation `message` including the page name.
+
+**Example:**
+
+```python
+# Delete page 20 from app 200
+apex_delete_page(app_id=200, page_id=20)
+```
+
+<Warning>
+  This operation is **permanent**. All regions, items, buttons, and processes on the page are deleted with it. Export the application first (`apex_export_app`) if you need a backup. The tool is annotated `_DELETE`, which means AI clients will prompt for explicit user confirmation before executing.
+</Warning>
+
+---
+
+### apex_copy_page
+
+Copy a page to a new page ID, within the same application or to a different application. The copy includes all regions, items, buttons, and processes from the source page.
+
+<ParamField path="source_app_id" type="integer" required>
+  Source application ID.
+</ParamField>
+
+<ParamField path="source_page_id" type="integer" required>
+  Source page ID to copy.
+</ParamField>
+
+<ParamField path="target_app_id" type="integer" required>
+  Target application ID. Can be the same as `source_app_id` to copy within the same app.
+</ParamField>
+
+<ParamField path="target_page_id" type="integer" required>
+  New page ID in the target application. Must not already exist in the target app.
+</ParamField>
+
+<ParamField path="new_page_name" type="string" default="">
+  Name for the copied page. Defaults to `"Copy of {original_name}"` if not provided.
+</ParamField>
+
+**Returns:** JSON with `status`, the original page name, and the new page details.
+
+**Examples:**
+
+```python
+# Duplicate page 10 as page 30 within the same app
+apex_copy_page(
+    source_app_id=200,
+    source_page_id=10,
+    target_app_id=200,
+    target_page_id=30,
+    new_page_name="Employee List (Copy)"
+)
+
+# Copy page 10 from app 200 to app 201 (e.g., promoting to production)
+apex_copy_page(
+    source_app_id=200,
+    source_page_id=10,
+    target_app_id=201,
+    target_page_id=10,
+    new_page_name="Employee List"
+)
+```
+
+<Note>
+  When copying across applications, the source and target applications must be in the same APEX workspace. Item names, region names, and processes are copied as-is — review them after copying if the source page references application-specific items or LOVs that do not exist in the target app.
+</Note>

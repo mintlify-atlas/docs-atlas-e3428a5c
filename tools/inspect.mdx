@@ -1,0 +1,461 @@
+---
+title: "Inspect and Edit Existing APEX Applications"
+sidebarTitle: "Inspect & Edit"
+description: "Reference for apex-mcp inspect tools: read, update, and delete regions, items, buttons, and processes in existing Oracle APEX apps without a full rebuild."
+---
+
+The inspect tools let you read and modify existing APEX applications without going through the create/finalize lifecycle. All read tools query the `APEX_APPLICATION_*` data dictionary views. All update and delete tools operate directly on the internal `WWV_FLOW_*` metadata tables, bypassing the App Builder UI entirely — changes take effect immediately.
+
+<Note>
+  **No import session required.** For existing applications you do not need to call `apex_create_app()` or `apex_finalize_app()`. Every inspect and update tool works on any application that exists in the database, as long as you have an active connection from `apex_connect()`.
+</Note>
+
+<Warning>
+  **Direct table updates bypass APEX UI validation.** After any `apex_update_*` or `apex_delete_*` call, verify the result in APEX App Builder to ensure the application renders correctly. Delete operations are permanent and cannot be undone without a backup.
+</Warning>
+
+---
+
+## Reading App Structure
+
+These tools are read-only and safe to call at any time. They query APEX data dictionary views and never modify the database.
+
+### `apex_get_app_details`
+
+Return complete metadata for an existing APEX application: name, alias, status, theme, authentication scheme, page list, application items, application processes, authorization schemes, navigation lists, and shared LOVs.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID to inspect.
+</ParamField>
+
+**Returns:** JSON with `status`, `app` (metadata row), `pages` (array), `page_count`, `application_items`, `application_processes`, `authorization_schemes`, `navigation_lists`, and `lovs`.
+
+---
+
+### `apex_get_page_details`
+
+Return all components on a specific page: regions, items, buttons, processes, dynamic actions (with nested action steps), computations, and validations.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID to inspect.
+</ParamField>
+
+**Returns:** JSON with `status`, `page` (metadata row), `regions`, `items`, `buttons`, `processes`, `dynamic_actions`, `computations`, and `validations`.
+
+---
+
+### `apex_list_regions`
+
+List all regions on a page with their type, source, display sequence, parent region, template, and condition settings.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+**Returns:** JSON with `status`, `data` (array of region objects), and `count`.
+
+---
+
+### `apex_list_items`
+
+List all form items on a page. Optionally filter by region name.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="region_name" type="string" default='""'>
+  Filter results to items in a specific region. Case-insensitive. Leave empty to return items from all regions.
+</ParamField>
+
+**Returns:** JSON with `status`, `data` (array with `item_name`, `item_label`, `item_type`, `sequence`, `region`, `default_value`, `source_column`, `format_mask`, `lov_definition`, `placeholder`, and condition fields), and `count`.
+
+---
+
+### `apex_list_processes`
+
+List all server-side processes on a page with their type, execution point, PL/SQL source, condition, and success/error message settings.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+**Returns:** JSON with `status`, `data` (array of process objects), and `count`.
+
+---
+
+### `apex_list_dynamic_actions`
+
+List all Dynamic Actions on a page. Each DA event object includes its nested action steps (`actions[]` array) with action type, sequence, affected elements, and any JavaScript code.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+**Returns:** JSON with `status`, `data` (array of DA event objects, each with a nested `actions` array), and `count`.
+
+---
+
+### `apex_list_lovs`
+
+List all shared Lists of Values (LOVs) for an application with their name, type, query, and creation/update timestamps.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+**Returns:** JSON with `status`, `data` (array with `lov_name`, `lov_type`, `lov_query`, `created_on`, `updated_on`), and `count`.
+
+---
+
+### `apex_list_auth_schemes`
+
+List all authorization schemes for an application with their name, type, custom function body (for `PLSQL_EXPRESSION` and `PLSQL_FUNCTION_RETURNING_BOOLEAN` types), error message, and caching setting.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+**Returns:** JSON with `status`, `data`, and `count`.
+
+---
+
+### `apex_diff_app`
+
+Compare two APEX applications and return a structural diff: pages only in app 1, pages only in app 2, pages in both, regions only in each app, and items only in each app (with P{n}_ prefix normalization so `P10_NAME` and `P20_NAME` compare as equivalent across apps).
+
+<ParamField path="app_id_1" type="integer" required>
+  First application ID (base application).
+</ParamField>
+
+<ParamField path="app_id_2" type="integer" required>
+  Second application ID (comparison target).
+</ParamField>
+
+**Returns:** JSON with `status`, `app_1`, `app_2`, and a `diff` object containing `pages`, `regions`, and `items` sections, each with `only_in_app_1`, `only_in_app_2`, and `in_both` / `in_both_count` keys.
+
+```json Example diff response (abbreviated)
+{
+  "status": "ok",
+  "app_1": { "id": 100, "name": "HR Dev",  "pages": 15 },
+  "app_2": { "id": 200, "name": "HR Prod", "pages": 14 },
+  "diff": {
+    "pages": {
+      "only_in_app_1": [{ "page_id": 99, "page_name": "Debug" }],
+      "only_in_app_2": [],
+      "in_both": [{ "page_id": 1, "page_name_app_1": "Home", "page_name_app_2": "Home" }]
+    },
+    "regions": { "only_in_app_1": [], "only_in_app_2": [], "in_both_count": 42 },
+    "items":   { "only_in_app_1": [], "only_in_app_2": [], "in_both_count": 87 }
+  }
+}
+```
+
+---
+
+## Updating Components
+
+These tools issue direct `UPDATE` statements on APEX internal tables. At least one optional field must be provided per call.
+
+### `apex_update_region`
+
+Update properties of an existing region. Operates on `WWV_FLOW_PAGE_PLUGS`.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="region_name" type="string" required>
+  Current name of the region to update. Case-insensitive.
+</ParamField>
+
+<ParamField path="new_name" type="string">
+  New display name for the region.
+</ParamField>
+
+<ParamField path="new_source_sql" type="string">
+  New SQL source for Interactive Report or chart regions.
+</ParamField>
+
+<ParamField path="new_static_content" type="string">
+  New HTML content for static regions.
+</ParamField>
+
+<ParamField path="new_sequence" type="integer">
+  New display sequence number.
+</ParamField>
+
+<ParamField path="new_auth_scheme" type="string">
+  New authorization scheme name.
+</ParamField>
+
+<ParamField path="new_condition_type" type="string">
+  New condition type (e.g., `"NEVER"`, `"EXPRESSION1_IS_NOT_NULL"`).
+</ParamField>
+
+<ParamField path="new_condition_expr" type="string">
+  New condition expression.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `page_id`, `region_name`, `changed` (dict of updated field names and new values), `message`, and `warning`.
+
+<Note>
+  If the current schema user does not have `UPDATE` on `WWV_FLOW_PAGE_PLUGS`, the error response includes the exact `GRANT` statement to run as APEX Admin.
+</Note>
+
+---
+
+### `apex_update_item`
+
+Update properties of an existing page item. Operates on `WWV_FLOW_STEP_ITEMS`.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="item_name" type="string" required>
+  Item name, e.g. `"P10_USERNAME"`. Case-insensitive.
+</ParamField>
+
+<ParamField path="new_label" type="string">
+  New display label.
+</ParamField>
+
+<ParamField path="new_item_type" type="string">
+  New item type constant, e.g. `"NATIVE_TEXT_FIELD"`, `"NATIVE_SELECT_LIST"`.
+</ParamField>
+
+<ParamField path="new_default_value" type="string">
+  New default value expression.
+</ParamField>
+
+<ParamField path="new_source_column" type="string">
+  New database source column for DML operations.
+</ParamField>
+
+<ParamField path="new_lov_definition" type="string">
+  New LOV query for select lists.
+</ParamField>
+
+<ParamField path="new_is_required" type="boolean">
+  `True` to make the item required (`field_required = 'Y'`), `False` to make it optional.
+</ParamField>
+
+<ParamField path="new_placeholder" type="string">
+  New placeholder text displayed in the input field.
+</ParamField>
+
+<ParamField path="new_read_only" type="boolean">
+  `True` to set `read_only_when_type = 'ALWAYS'`, `False` to make the item editable.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `page_id`, `item_name`, `changed`, `message`, and `warning`.
+
+---
+
+### `apex_update_page`
+
+Update page-level settings. Operates on `WWV_FLOW_STEPS`.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="new_name" type="string">
+  New page display name.
+</ParamField>
+
+<ParamField path="new_title" type="string">
+  New browser/tab title.
+</ParamField>
+
+<ParamField path="new_auth_scheme" type="string">
+  New authorization scheme name. Pass an empty string `""` to remove the authorization requirement.
+</ParamField>
+
+<ParamField path="new_page_mode" type="string">
+  New page mode. Valid values: `"NORMAL"`, `"MODAL_DIALOG"`, `"NON_MODAL_DIALOG"`.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `page_id`, `updated_fields`, `message`, and `warning`.
+
+---
+
+### `apex_copy_page`
+
+Copy a page from one application to another (or within the same application with a new page ID). Calls `wwv_flow_copy.copy_page()` with a fallback to `wwv_flow_utilities.copy_page()`.
+
+<ParamField path="source_app_id" type="integer" required>
+  Source application ID.
+</ParamField>
+
+<ParamField path="source_page_id" type="integer" required>
+  Source page ID to copy.
+</ParamField>
+
+<ParamField path="target_app_id" type="integer" required>
+  Target application ID (can be the same as `source_app_id`).
+</ParamField>
+
+<ParamField path="target_page_id" type="integer" required>
+  New page ID in the target application. Must not already exist.
+</ParamField>
+
+<ParamField path="new_page_name" type="string" default='""'>
+  Name for the copied page. Defaults to `"Copy of {original_name}"`.
+</ParamField>
+
+**Returns:** JSON with `status`, `source_app_id`, `source_page_id`, `target_app_id`, `target_page_id`, `new_page_name`, and `message`.
+
+---
+
+## Deleting Components
+
+<Warning>
+  All delete operations are **permanent and irreversible** without a database backup. Deleting a region also deletes all its child items, buttons, and sub-regions. Deleting a page deletes all its components. Always verify in APEX App Builder after any delete.
+</Warning>
+
+### `apex_delete_region`
+
+Delete a specific region and all its child items, buttons, and sub-regions.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="region_name" type="string" required>
+  Exact region name. Case-insensitive. Use `apex_list_regions()` to confirm the exact name.
+</ParamField>
+
+**Returns:** JSON with `status`, `region_name`, `plug_id`, `child_items_deleted` (count), `message`, and `warning`.
+
+---
+
+### `apex_delete_item`
+
+Delete a specific form item from a page.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="item_name" type="string" required>
+  Item name, e.g. `"P10_STATUS"`. Case-insensitive.
+</ParamField>
+
+**Returns:** JSON with `status`, `item_name`, `message`, and `warning`.
+
+---
+
+### `apex_delete_button`
+
+Delete a specific button from a page.
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID.
+</ParamField>
+
+<ParamField path="button_name" type="string" required>
+  Button name, e.g. `"CREATE"` or `"SAVE"`. Case-insensitive.
+</ParamField>
+
+**Returns:** JSON with `status`, `button_name`, `message`, and `warning`.
+
+---
+
+### `apex_delete_page`
+
+Delete an entire page and all its components from an application. Cannot delete Page 0 (the Global Page).
+
+<ParamField path="app_id" type="integer" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Page ID to delete. Must not be `0`.
+</ParamField>
+
+**Returns:** JSON with `status` and `message`.
+
+---
+
+## Inspect Workflow Example
+
+The following sequence shows a typical workflow for diagnosing and fixing an issue in an existing application — no import session required:
+
+```python
+# Step 1: Connect to Oracle ADB
+apex_connect()
+
+# Step 2: Get the full app structure to understand what's there
+apex_get_app_details(app_id=200)
+# → Returns app name, theme, pages list, auth schemes, LOVs, etc.
+
+# Step 3: Drill into a specific page
+apex_get_page_details(app_id=200, page_id=10)
+# → Returns all regions, items, buttons, processes on page 10
+
+# Step 4: List just the regions if the full detail is too verbose
+apex_list_regions(app_id=200, page_id=10)
+# → [{"region_name": "Products", "source_type": "SQL", ...}, ...]
+
+# Step 5: Fix the region's SQL query — takes effect immediately
+apex_update_region(
+    app_id=200,
+    page_id=10,
+    region_name="Products",
+    new_source_sql="SELECT product_id, product_name, price, status FROM products ORDER BY product_name"
+)
+# → {"status": "ok", "changed": {"plug_source": "(updated)"}, ...}
+
+# Step 6: Verify the fix by checking the region source again
+apex_list_regions(app_id=200, page_id=10)
+
+# Step 7: If a stale debug item exists, remove it
+apex_delete_item(app_id=200, page_id=10, item_name="P10_DEBUG_FLAG")
+# → {"status": "ok", "message": "Item 'P10_DEBUG_FLAG' deleted ..."}
+```

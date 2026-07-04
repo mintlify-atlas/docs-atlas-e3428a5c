@@ -1,0 +1,233 @@
+---
+title: "Generate ORDS REST Endpoints for Oracle Tables"
+sidebarTitle: "REST Endpoints"
+description: "Use apex_generate_rest_endpoints to create ORDS REST API endpoints (GET, POST, PUT, DELETE) for Oracle database tables in seconds."
+---
+
+apex-mcp can generate Oracle REST Data Services (ORDS) REST endpoints for any table with a single tool call. The generated endpoints follow the standard REST collection/item pattern and are created directly in the Oracle database using the `ORDS.DEFINE_MODULE`, `ORDS.DEFINE_TEMPLATE`, and `ORDS.DEFINE_HANDLER` PL/SQL API — the same mechanism ORDS uses internally.
+
+## `apex_generate_rest_endpoints`
+
+Creates all five standard CRUD endpoints for a table: list collection, create, get by primary key, update, and delete.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `table_name` | `str` | *(required)* | Oracle table name (case-insensitive) |
+| `base_path` | `str` | table name (lowercase) | URL path segment for the ORDS module |
+| `require_auth` | `bool` | `True` | Whether endpoints require ORDS authentication |
+| `pk_column` | `str` | auto-detected | Primary key column name. Auto-detected from `user_constraints` if omitted |
+| `schema` | `str` | `SELECT USER FROM DUAL` | Database schema. Auto-resolved if omitted |
+
+### What Gets Created
+
+For each call, five ORDS handlers are registered:
+
+| Method | Path Pattern | Description |
+|--------|-------------|-------------|
+| `GET` | `/{base_path}/` | List all records (paginated, 25 per page) |
+| `POST` | `/{base_path}/` | Create a new record |
+| `GET` | `/{base_path}/:{pk_col}` | Get a single record by primary key |
+| `PUT` | `/{base_path}/:{pk_col}` | Update a record by primary key |
+| `DELETE` | `/{base_path}/:{pk_col}` | Delete a record by primary key |
+
+### Example
+
+```python
+apex_generate_rest_endpoints(
+    table_name="EMPLOYEES",
+    base_path="employees",
+    require_auth=True,
+)
+```
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "table_name": "EMPLOYEES",
+  "module_name": "employees",
+  "base_path": "/employees/",
+  "pk_column": "EMPLOYEE_ID",
+  "require_auth": true,
+  "endpoints": [
+    {"method": "GET",    "path": "/employees/",              "description": "List all"},
+    {"method": "POST",   "path": "/employees/",              "description": "Create"},
+    {"method": "GET",    "path": "/employees/:employee_id",  "description": "Get by PK"},
+    {"method": "PUT",    "path": "/employees/:employee_id",  "description": "Update"},
+    {"method": "DELETE", "path": "/employees/:employee_id",  "description": "Delete"}
+  ]
+}
+```
+
+---
+
+## Generated Endpoint URL Pattern
+
+The full URL for each endpoint follows the ORDS schema-based routing pattern:
+
+```
+# Collection (list / create):
+https://<adb-host>/ords/<schema>/<base_path>/
+
+# Item (get / update / delete):
+https://<adb-host>/ords/<schema>/<base_path>/:<pk_column_lower>
+```
+
+For an Oracle Autonomous Database instance, this looks like:
+
+```
+GET    https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/
+POST   https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/
+GET    https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/101
+PUT    https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/101
+DELETE https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/101
+```
+
+### Sample curl Calls
+
+```bash
+# List all employees (authenticated)
+curl -X GET "https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/" \
+     -H "Authorization: Bearer <your-oauth-token>"
+
+# Get employee 101
+curl -X GET "https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/101" \
+     -H "Authorization: Bearer <your-oauth-token>"
+
+# Create a new employee
+curl -X POST "https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/employees/" \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer <your-oauth-token>" \
+     -d '{"first_name": "Jane", "last_name": "Smith", "job_id": "IT_PROG", "salary": 6000}'
+
+# List departments (public — no auth required)
+curl -X GET "https://myinstance.adb.region-1.oraclecloudapps.com/ords/hr_app/departments/"
+```
+
+---
+
+## Batch Generation
+
+For exposing multiple tables at once, use the batch pattern from `demos/demo_rest_endpoints.py`. The demo creates 5 tables × 5 endpoints = 25 ORDS handlers in under 1 second:
+
+```python
+from apex_mcp.tools.sql_tools    import apex_connect
+from apex_mcp.tools.devops_tools import apex_generate_rest_endpoints
+
+# 1. Connect
+apex_connect()
+
+# 2. Define tables and settings
+ENDPOINTS = [
+    {"table": "EMPLOYEES",   "path": "employees",   "auth": True},
+    {"table": "DEPARTMENTS", "path": "departments", "auth": False},   # public reference
+    {"table": "JOBS",        "path": "jobs",        "auth": False},   # public reference
+    {"table": "LOCATIONS",   "path": "locations",   "auth": False},   # public reference
+    {"table": "COUNTRIES",   "path": "countries",   "auth": False},   # public reference
+]
+
+# 3. Generate in a loop — each call creates 5 ORDS handlers
+for cfg in ENDPOINTS:
+    result = apex_generate_rest_endpoints(
+        table_name=cfg["table"],
+        base_path=cfg["path"],
+        require_auth=cfg["auth"],
+    )
+    print(result)
+```
+
+<Tip>
+  For even faster execution on large batches, wrap the loop in `apex_begin_batch()` / `apex_commit_batch()` to queue all the ORDS PL/SQL calls and execute them in a single database round-trip.
+</Tip>
+
+```python
+from apex_mcp.tools.devops_tools import apex_begin_batch, apex_commit_batch
+
+apex_begin_batch()
+for cfg in ENDPOINTS:
+    apex_generate_rest_endpoints(
+        table_name=cfg["table"],
+        base_path=cfg["path"],
+        require_auth=cfg["auth"],
+    )
+apex_commit_batch()
+# → All 25 handlers created in 1 round-trip
+```
+
+---
+
+## Authentication
+
+The `require_auth` parameter controls the documentation value returned in the response JSON. It does **not** automatically configure ORDS privilege policies — that must be done separately in ORDS Admin or via `ORDS.DEFINE_PRIVILEGE`.
+
+| `require_auth` | Meaning |
+|---------------|---------|
+| `True` (default) | Endpoint is intended to be protected; configure an ORDS privilege for this module in ORDS Admin |
+| `False` | Endpoint is intended to be public; no ORDS privilege restriction |
+
+<Warning>
+  Setting `require_auth=False` in apex-mcp does **not** make the endpoint public automatically. It is a documentation flag only. Actual ORDS security is controlled by ORDS privilege grants, which must be configured separately via the ORDS Admin UI or `ORDS.DEFINE_PRIVILEGE` / `ORDS.GRANT_PRIVILEGE` PL/SQL calls.
+</Warning>
+
+To make a module truly public in ORDS, the module must not be associated with any privilege. New modules are public by default unless a privilege is explicitly applied.
+
+---
+
+## Prerequisites and Limitations
+
+<Note>
+  ORDS must be configured and enabled on your Oracle ADB instance separately. apex-mcp only creates the ORDS module/template/handler definitions in the database. It does not start ORDS, configure OAuth clients, or manage ORDS access policies.
+</Note>
+
+**Requirements for `apex_generate_rest_endpoints`:**
+
+- Active Oracle connection (`apex_connect()` must be called first)
+- The current schema user must have `EXECUTE` privilege on the `ORDS` package (granted by default to schema users on Oracle ADB)
+- The table must exist and be owned by the current schema
+- The table must have a primary key constraint (or you must supply `pk_column` explicitly)
+
+**Verify a module was created:**
+
+```sql
+-- Check ORDS modules in the current schema
+SELECT name, base_path, status
+  FROM user_ords_modules
+ ORDER BY name;
+
+-- Check handlers for a specific module
+SELECT t.uri_template, h.method, h.source_type
+  FROM user_ords_modules m
+  JOIN user_ords_templates t ON t.module_id = m.id
+  JOIN user_ords_handlers h  ON h.template_id = t.id
+ WHERE m.name = 'employees'
+ ORDER BY t.uri_template, h.method;
+```
+
+---
+
+## Generate API Documentation
+
+After creating REST endpoints, use `apex_generate_docs` to automatically generate Markdown documentation for your entire APEX application, including all pages, regions, items, and shared LOVs.
+
+```python
+apex_generate_docs(app_id=200)
+```
+
+This queries the APEX data dictionary views (`apex_application_pages`, `apex_application_page_regions`, `apex_application_page_items`, etc.) and returns a formatted Markdown document you can save to your project repository:
+
+```python
+import json
+
+result = json.loads(apex_generate_docs(app_id=200))
+if result["status"] == "ok":
+    with open("docs/app200.md", "w") as f:
+        f.write(result["markdown"])
+
+    print(f"Pages:    {result['stats']['pages']}")
+    print(f"Regions:  {result['stats']['regions']}")
+    print(f"Items:    {result['stats']['items']}")
+    print(f"LOVs:     {result['stats']['lovs']}")
+```

@@ -1,0 +1,513 @@
+---
+title: "Rich HTML UI Components for APEX Pages"
+sidebarTitle: "UI Components"
+description: "Reference for apex-mcp's 20 rich HTML UI components: hero banners, KPI rows, leaderboards, heatmaps, activity streams, progress trackers, and more."
+---
+
+These 20 components generate richly styled HTML via `NATIVE_PLSQL` region source — CSP-compliant server-side rendering for Oracle APEX 24.2. Each tool creates a PL/SQL region that calls `sys.htp.p()` to emit self-contained HTML with embedded CSS. No CDN resources, no inline JavaScript libraries, no separate static file uploads required.
+
+<Note>
+  These components are rendered by APEX's `NATIVE_PLSQL` region source mechanism, which is CSP-compliant in APEX 24.2. All CSS is emitted via `sys.htp.p('<style>...</style>')` at render time, and JavaScript (where used) runs in the APEX page context without violating Content Security Policy. All user-supplied data passes through `APEX_ESCAPE.HTML()` before output.
+</Note>
+
+All tools share a common guard check: the page must already exist in the session (created with `apex_add_page()`, `apex_generate_crud()`, or similar). Every tool returns a JSON object with `status`, `region_id`, and `page_id`.
+
+---
+
+## Layout & Navigation
+
+### `apex_add_hero_banner`
+
+Add a full-width hero banner to a page. Renders a prominent welcome or header section with a gradient background, title, optional subtitle, inline KPI stats (with live SQL), and an optional call-to-action button.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="title" type="string" required>
+  Main banner title. Supports APEX substitution strings, e.g. `"Welcome, &APP_USER.!"`.
+</ParamField>
+<ParamField path="subtitle" type="string">Secondary text line under the title.</ParamField>
+<ParamField path="stats" type="array">
+  Up to 4 inline KPI items displayed inside the banner. Each object:
+  ```json
+  {"label": "Open Tickets", "sql": "SELECT COUNT(*) FROM TICKETS WHERE STATUS='OPEN'", "suffix": ""}
+  ```
+</ParamField>
+<ParamField path="bg_color" type="string" default="unimed">
+  Background color — named (`unimed`, `blue`, `teal`) or hex (`#00995D`).
+</ParamField>
+<ParamField path="button_label" type="string">CTA button label (e.g., `"New Record"`).</ParamField>
+<ParamField path="button_url" type="string">URL or `f?p=` reference for the CTA button.</ParamField>
+<ParamField path="title_size" type="string" default="1.7rem">CSS `font-size` for the title.</ParamField>
+<ParamField path="subtitle_size" type="string" default="1rem">CSS `font-size` for the subtitle.</ParamField>
+<ParamField path="custom_css" type="string">Additional CSS rules injected into the style block.</ParamField>
+<ParamField path="sequence" type="integer" default="5">Display order on page.</ParamField>
+
+**Example:**
+
+```python
+apex_add_hero_banner(
+    page_id=1,
+    title="Welcome to HR Portal, &APP_USER.!",
+    subtitle="Manage your workforce with ease.",
+    bg_color="#1e88e5",
+    stats=[
+        {"label": "Employees",    "sql": "SELECT COUNT(*) FROM EMPLOYEES"},
+        {"label": "Open Roles",   "sql": "SELECT COUNT(*) FROM JOB_POSTINGS WHERE STATUS='OPEN'"},
+        {"label": "On Leave",     "sql": "SELECT COUNT(*) FROM LEAVE_REQUESTS WHERE STATUS='APPROVED' AND SYSDATE BETWEEN START_DATE AND END_DATE"},
+    ],
+    button_label="New Employee",
+    button_url="f?p=&APP_ID.:11:&SESSION.::&DEBUG.:::",
+)
+```
+
+---
+
+### `apex_add_tabs_container`
+
+Add multiple content panels with a tab bar. Clicking a tab button shows that panel and hides the others. Implemented with an inline JavaScript `mcpTab()` function — no external dependencies.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="tabs" type="array" required>
+  List of tab panel definitions. Each object:
+  ```json
+  {"title": "Overview",   "content": "<p>Any static HTML content here.</p>"},
+  {"title": "Details",    "content": "<ul><li>Detail 1</li></ul>"}
+  ```
+</ParamField>
+<ParamField path="color" type="string" default="unimed">Accent color for the active tab indicator.</ParamField>
+<ParamField path="sequence" type="integer" default="10">Display order on page.</ParamField>
+
+---
+
+### `apex_add_collapsible_region`
+
+Add an expand/collapse toggle region. Content is visible or hidden based on the current state, with a smooth CSS transition.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region name (shown as the toggle header).</ParamField>
+<ParamField path="content_html" type="string">Static HTML to display inside the collapsible body.</ParamField>
+<ParamField path="content_sql" type="string">SQL returning a VARCHAR2 value rendered as the body content. Overrides `content_html` if both are provided.</ParamField>
+<ParamField path="collapsed" type="boolean" default="false">Initial state: `true` = starts collapsed.</ParamField>
+<ParamField path="sequence" type="integer" default="10">Display order on page.</ParamField>
+
+---
+
+### `apex_add_quick_links`
+
+Add a grid of icon-button quick links — visually rich navigation shortcuts ideal for dashboard homepages.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="links" type="array" required>
+  List of link definitions (4–8 recommended). Each object:
+  ```json
+  {
+    "label": "Employees",
+    "url":   "f?p=&APP_ID.:10:&SESSION.::&DEBUG.:::",
+    "icon":  "fa-users",
+    "color": "#1e88e5",
+    "badge": "42"
+  }
+  ```
+  `badge` is optional — use for counts or status labels.
+</ParamField>
+<ParamField path="columns" type="integer" default="4">Number of columns (2–5).</ParamField>
+<ParamField path="sequence" type="integer" default="10">Display order on page.</ParamField>
+
+**Example:**
+
+```python
+apex_add_quick_links(
+    page_id=1,
+    region_name="Quick Actions",
+    columns=4,
+    links=[
+        {"label": "Employees",   "url": "f?p=&APP_ID.:10:&SESSION.:::", "icon": "fa-users",       "color": "#1e88e5"},
+        {"label": "Departments", "url": "f?p=&APP_ID.:12:&SESSION.:::", "icon": "fa-building",    "color": "#43a047"},
+        {"label": "Reports",     "url": "f?p=&APP_ID.:20:&SESSION.:::", "icon": "fa-bar-chart",   "color": "#fb8c00"},
+        {"label": "Settings",    "url": "f?p=&APP_ID.:99:&SESSION.:::", "icon": "fa-cog",         "color": "#8e24aa"},
+    ],
+)
+```
+
+---
+
+## Data Display
+
+### `apex_add_kpi_row`
+
+Add a compact horizontal KPI strip — a single-line bar of metrics with colored values, no icons. Lighter than `apex_add_metric_cards`; ideal as a summary separator between page sections.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="metrics" type="array" required>
+  List of metric objects (3–6 items recommended). Each:
+  ```json
+  {"label": "Avg Score", "sql": "SELECT ROUND(AVG(SCORE),1) FROM RESULTS", "suffix": "%", "color": "green"}
+  ```
+</ParamField>
+<ParamField path="value_size" type="string" default="1.4rem">CSS `font-size` for metric values.</ParamField>
+
+---
+
+### `apex_add_stat_delta`
+
+Add metric cards with a current value and a delta arrow showing percentage change vs. a previous period. Each card shows an icon, label, current value, and a colored up/down arrow with the percentage change.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="metrics" type="array" required>
+  List of metric objects. Each:
+  ```json
+  {
+    "label":    "Monthly Orders",
+    "sql":      "SELECT COUNT(*) FROM ORDERS WHERE TRUNC(ORDER_DATE,'MM') = TRUNC(SYSDATE,'MM')",
+    "prev_sql": "SELECT COUNT(*) FROM ORDERS WHERE TRUNC(ORDER_DATE,'MM') = ADD_MONTHS(TRUNC(SYSDATE,'MM'),-1)",
+    "icon":     "fa-shopping-cart",
+    "color":    "blue",
+    "suffix":   ""
+  }
+  ```
+  `prev_sql` is used to compute the delta percentage. Set to `"SELECT 0 FROM DUAL"` if no prior period exists.
+</ParamField>
+<ParamField path="columns" type="integer" default="4">Number of columns (2–4).</ParamField>
+<ParamField path="delta_label" type="string" default="vs anterior">Label text after the percentage change.</ParamField>
+
+---
+
+### `apex_add_spotlight_metric`
+
+Add a large centered spotlight display for a single primary KPI — the value is rendered very large in the center, making it unmissable.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning a single scalar value.</ParamField>
+<ParamField path="label" type="string" required>Metric label displayed below the value.</ParamField>
+<ParamField path="color" type="string" default="unimed">Accent color for the value and icon.</ParamField>
+<ParamField path="icon" type="string" default="fa-star">Font Awesome class displayed above the value.</ParamField>
+<ParamField path="suffix" type="string">Unit suffix (e.g., `%`, ` pts`).</ParamField>
+<ParamField path="prefix" type="string">Unit prefix (e.g., `$`, `R$ `).</ParamField>
+<ParamField path="subtitle_sql" type="string">Optional SQL for a smaller subtitle line below the label.</ParamField>
+<ParamField path="value_size" type="string" default="3.2rem">CSS `font-size` for the value.</ParamField>
+
+---
+
+### `apex_add_leaderboard`
+
+Add a ranked leaderboard list from SQL. Displays the top-N items with rank position, optional medal icons for top 3, a proportional progress bar, and the numeric value.
+
+<Note>
+  SQL should include `ORDER BY value_column DESC` to rank items correctly. The max value is auto-detected from the result set to scale the progress bars.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name (shown as the header).</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning label and value columns, ordered DESC.
+  ```sql
+  SELECT REP_NAME AS LABEL, TOTAL_SALES AS VALUE
+    FROM SALES_REPS
+   ORDER BY TOTAL_SALES DESC
+  ```
+</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column name for item labels.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column name for numeric values.</ParamField>
+<ParamField path="max_rows" type="integer" default="10">Maximum rows to display.</ParamField>
+<ParamField path="color" type="string" default="unimed">Accent color for progress bars and values.</ParamField>
+<ParamField path="show_medals" type="boolean" default="true">Show 🥇🥈🥉 medal icons for top 3.</ParamField>
+
+---
+
+### `apex_add_data_card_grid`
+
+Add a SQL-driven card grid where each result row becomes a visual card. Supports optional subtitle, badge, and per-row click URL columns.
+
+<Note>
+  SQL must return at least `title_column` and `value_column`. Additional columns for subtitle, badge, and URL are optional — specify with the `subtitle_column`, `badge_column`, and `url_column` parameters.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning row data for cards.</ParamField>
+<ParamField path="title_column" type="string" default="TITLE">Column for card title.</ParamField>
+<ParamField path="subtitle_column" type="string">Column for card subtitle (optional).</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for the prominent numeric value.</ParamField>
+<ParamField path="badge_column" type="string">Column for badge text (optional, e.g., status).</ParamField>
+<ParamField path="url_column" type="string">Column providing a per-card click URL (optional).</ParamField>
+<ParamField path="color" type="string" default="blue">Accent color for value text and top border.</ParamField>
+<ParamField path="columns" type="integer" default="3">Grid columns (2–4).</ParamField>
+
+---
+
+### `apex_add_percent_bars`
+
+Add horizontal percentage bars rendered in pure HTML/CSS. Lighter and faster-rendering than JET charts — ideal for quick visual comparisons.
+
+<Note>
+  SQL must return `LABEL` and `VALUE` columns. Values are normalized against the maximum row value to compute bar widths as percentages.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL returning `LABEL` and `VALUE` columns.</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for bar labels.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for bar values.</ParamField>
+<ParamField path="color" type="string" default="unimed">Bar fill color (named or hex).</ParamField>
+<ParamField path="show_values" type="boolean" default="true">Display the numeric value at the end of each bar.</ParamField>
+
+---
+
+### `apex_add_ribbon_stats`
+
+Add a full-width colored ribbon with multiple KPI stats displayed side by side, separated by subtle dividers.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="metrics" type="array" required>
+  List of stat definitions (3–6). Each:
+  ```json
+  {"label": "Uptime", "sql": "SELECT '99.9%' FROM DUAL", "icon": "fa-server", "color": "green", "suffix": ""}
+  ```
+</ParamField>
+<ParamField path="bg_color" type="string" default="#f8f9fa">Ribbon background color (CSS value).</ParamField>
+
+---
+
+## Status & Indicators
+
+### `apex_add_traffic_light`
+
+Add a traffic-light status indicator grid. Each SQL row produces a card with a colored dot: green (OK/CONCLUIDA/ATIVO), amber (WARNING/EM_ANDAMENTO), or red (ERROR/CANCELADA). Unknown values render as grey.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning a label column and a status column.
+  ```sql
+  SELECT SERVICE_NAME AS LABEL,
+         CASE WHEN ERROR_COUNT = 0 THEN 'GREEN'
+              WHEN ERROR_COUNT < 5 THEN 'AMBER'
+              ELSE 'RED'
+         END AS STATUS
+    FROM SERVICE_HEALTH
+   ORDER BY 1
+  ```
+</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for item labels.</ParamField>
+<ParamField path="status_column" type="string" default="STATUS">
+  Column for status values. Automatically maps:
+  `GREEN` / `OK` / `CONCLUIDA` / `ATIVO` → green
+  `AMBER` / `WARNING` / `EM_ANDAMENTO` → amber
+  `RED` / `ERROR` / `CANCELADA` → red
+</ParamField>
+
+---
+
+### `apex_add_alert_box`
+
+Add a styled alert/notification box. More visual than `apex_add_notification_region` — supports a bold title line and optional dismiss button.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="message" type="string" required>Alert message text. Supports `&ITEM.` substitutions.</ParamField>
+<ParamField path="alert_type" type="string" default="info">
+  Visual style: `info` (blue), `success` (green), `warning` (orange), `error` (red).
+  All combinations maintain WCAG AA contrast (4.5:1+).
+</ParamField>
+<ParamField path="title" type="string">Optional bold title line above the message.</ParamField>
+<ParamField path="dismissible" type="boolean" default="true">Show × close button that removes the alert from the DOM.</ParamField>
+<ParamField path="icon" type="string">Font Awesome class override. Uses type default if empty (e.g., `fa-info-circle` for info).</ParamField>
+<ParamField path="sequence" type="integer" default="5">Display order on page (set low to appear above other content).</ParamField>
+
+**Example:**
+
+```python
+apex_add_alert_box(
+    page_id=10,
+    message="Your session will expire in 10 minutes. Please save your work.",
+    alert_type="warning",
+    title="Session Expiry Notice",
+    dismissible=True,
+    sequence=3,
+)
+```
+
+---
+
+### `apex_add_progress_tracker`
+
+Add a horizontal step-by-step progress tracker with numbered breadcrumbs. Ideal for wizard flows, onboarding processes, or multi-stage approvals. Completed steps show a checkmark; the active step is highlighted.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="steps" type="array" required>List of step label strings, e.g. `["Basic Info", "Review", "Confirm"]`.</ParamField>
+<ParamField path="current_step" type="integer" default="1">Active step number (1-based). Steps before this are marked as completed.</ParamField>
+<ParamField path="color" type="string" default="unimed">Accent color for active and completed steps.</ParamField>
+<ParamField path="completed_label" type="string">Override the checkmark character for completed steps. Defaults to `✓`.</ParamField>
+
+---
+
+### `apex_add_comparison_panel`
+
+Add a side-by-side two-column comparison panel (A vs B). Ideal for period comparison, group A/B analysis, or plan vs. actual.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="left_label" type="string" required>Header text for the left column (e.g., `"Last Month"`).</ParamField>
+<ParamField path="left_metrics" type="array" required>
+  Metrics for the left column. Each object:
+  ```json
+  {"label": "Total Sales", "sql": "SELECT SUM(AMOUNT) FROM ORDERS WHERE ...", "suffix": ""}
+  ```
+</ParamField>
+<ParamField path="right_label" type="string" required>Header text for the right column (e.g., `"This Month"`).</ParamField>
+<ParamField path="right_metrics" type="array" required>Metrics for the right column (same format as `left_metrics`).</ParamField>
+<ParamField path="left_color" type="string" default="blue">Accent color for the left column header.</ParamField>
+<ParamField path="right_color" type="string" default="green">Accent color for the right column header.</ParamField>
+
+---
+
+### `apex_add_status_matrix`
+
+Add a status matrix card grid — each SQL row becomes a card with a colored dot and badge reflecting its status. Optional group column adds a category label below each card.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning label and status columns.
+  ```sql
+  SELECT SERVICE_NAME AS LABEL, HEALTH_STATUS AS STATUS
+    FROM SERVICES
+   ORDER BY 1
+  ```
+</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for item name.</ParamField>
+<ParamField path="status_column" type="string" default="STATUS">
+  Column with status text. Automatically colored:
+  `ATIVO` / `ACTIVE` / `OK` / `CONCLUIDA` → green
+  `PENDENTE` / `EM_ANDAMENTO` / `PENDING` → amber
+  `INATIVO` / `CANCELADA` / `ERROR` → red
+</ParamField>
+<ParamField path="group_column" type="string">Optional column for category grouping label shown below the item.</ParamField>
+
+---
+
+## Advanced
+
+### `apex_add_activity_stream`
+
+Add a scrollable audit/activity feed showing recent events in reverse-chronological order. Relative date labels are computed automatically: `"há minutos"`, `"3h atrás"`, `"2d atrás"`, or `DD/MM/YYYY`.
+
+<Note>
+  SQL must return at minimum a text column and a date/timestamp column. Alias them to the values you pass as `text_column` and `date_column`. ORDER BY date DESC for correct feed order.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name (shown as the feed header).</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning activity data ordered by date DESC.
+  ```sql
+  SELECT ACTION_DESC AS TEXT, ACTION_DATE AS DT, 'fa-edit' AS ICON_COL
+    FROM AUDIT_LOG
+   ORDER BY ACTION_DATE DESC
+  ```
+</ParamField>
+<ParamField path="text_column" type="string" default="TEXT">Column for the activity description.</ParamField>
+<ParamField path="date_column" type="string" default="DT">Column for the event timestamp (DATE or TIMESTAMP).</ParamField>
+<ParamField path="icon_column" type="string">Column providing a Font Awesome icon class per row (optional).</ParamField>
+<ParamField path="color_column" type="string">Column providing a hex color per row (optional).</ParamField>
+<ParamField path="default_icon" type="string" default="fa-circle">Default icon class when `icon_column` is empty or not provided.</ParamField>
+<ParamField path="default_color" type="string" default="blue">Default accent color.</ParamField>
+<ParamField path="max_rows" type="integer" default="20">Maximum rows to display.</ParamField>
+
+**Example:**
+
+```python
+apex_add_activity_stream(
+    page_id=1,
+    region_name="Recent Activity",
+    sql_query="""
+        SELECT DS_DESCRIPTION AS TEXT,
+               DT_CREATED      AS DT,
+               CASE DS_TYPE
+                 WHEN 'CREATE' THEN 'fa-plus-circle'
+                 WHEN 'UPDATE' THEN 'fa-edit'
+                 WHEN 'DELETE' THEN 'fa-trash'
+                 ELSE 'fa-circle'
+               END AS ICON_COL
+          FROM AUDIT_LOG
+         ORDER BY DT_CREATED DESC
+    """,
+    icon_column="ICON_COL",
+    max_rows=15,
+)
+```
+
+---
+
+### `apex_add_tag_cloud`
+
+Add a dynamic tag/word cloud from SQL. Font size scales proportionally with the count column value. Colors cycle through a built-in 10-color palette.
+
+<Note>
+  SQL must return a label column and a count/frequency column. The tag with the highest count gets the largest font size; others scale proportionally.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning tag text and frequency.
+  ```sql
+  SELECT CATEGORY_NAME AS LABEL, POST_COUNT AS CNT
+    FROM CATEGORIES
+   ORDER BY POST_COUNT DESC
+  ```
+</ParamField>
+<ParamField path="label_column" type="string" default="LABEL">Column for tag text.</ParamField>
+<ParamField path="count_column" type="string" default="CNT">Column for the frequency/weight value.</ParamField>
+
+---
+
+### `apex_add_heatmap_grid`
+
+Add a color-intensity heatmap matrix. Each cell's background opacity reflects its value relative to the maximum value in the dataset. SQL must return row labels, column labels, and numeric cell values.
+
+<Note>
+  SQL must return three columns for the row dimension, column dimension, and cell value. The tool dynamically collects unique row and column labels, then renders a full cross-tab grid. Empty intersections are rendered as blank cells.
+</Note>
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning row label, column label, and numeric value.
+  ```sql
+  SELECT TO_CHAR(ORDER_DATE,'DY') AS ROW_LABEL,
+         TO_CHAR(ORDER_DATE,'HH24') AS COL_LABEL,
+         COUNT(*) AS VALUE
+    FROM ORDERS
+   GROUP BY TO_CHAR(ORDER_DATE,'DY'), TO_CHAR(ORDER_DATE,'HH24')
+   ORDER BY 1, 2
+  ```
+</ParamField>
+<ParamField path="row_column" type="string" default="ROW_LABEL">Column for row labels.</ParamField>
+<ParamField path="col_column" type="string" default="COL_LABEL">Column for column labels.</ParamField>
+<ParamField path="value_column" type="string" default="VALUE">Column for numeric cell values.</ParamField>
+<ParamField path="color" type="string" default="blue">Heatmap base color. High-intensity cells use this color; low-intensity cells use a tint.</ParamField>
+
+**Example:**
+
+```python
+apex_add_heatmap_grid(
+    page_id=5,
+    region_name="Orders by Day & Hour",
+    sql_query="""
+        SELECT TO_CHAR(ORDER_DATE, 'DY')  AS ROW_LABEL,
+               TO_CHAR(ORDER_DATE, 'HH24') AS COL_LABEL,
+               COUNT(*) AS VALUE
+          FROM ORDERS
+         WHERE ORDER_DATE >= SYSDATE - 90
+         GROUP BY TO_CHAR(ORDER_DATE, 'DY'), TO_CHAR(ORDER_DATE, 'HH24')
+         ORDER BY 1, 2
+    """,
+    color="#1e88e5",
+)
+```

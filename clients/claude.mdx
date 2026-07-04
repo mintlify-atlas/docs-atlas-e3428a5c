@@ -1,0 +1,214 @@
+---
+title: "Connect apex-mcp to Claude Code and Claude Desktop"
+sidebarTitle: "Claude"
+description: "Configure apex-mcp as an MCP server in Claude Code or Claude Desktop using .mcp.json with stdio transport and Oracle connection environment variables."
+---
+
+apex-mcp integrates directly with both Claude Code (the CLI) and Claude Desktop using the native MCP stdio transport. Once configured, Claude gains access to all 116 Oracle APEX tools — letting you create apps, generate CRUD pages, add charts, configure auth schemes, and more through natural language, without ever touching the App Builder UI.
+
+## Claude Code
+
+<Steps>
+  <Step title="Install apex-mcp">
+    Clone the repository and install it as an editable package so the `apex-mcp` command is available in your shell:
+
+    ```bash
+    git clone https://github.com/your-org/apex-mcp
+    cd apex-mcp
+    pip install -e .
+    ```
+
+    Verify the install:
+
+    ```bash
+    python -m apex_mcp --help
+    ```
+  </Step>
+
+  <Step title="Create .mcp.json in your project root">
+    Create a file named `.mcp.json` at the root of the directory you open in Claude Code. Claude Code automatically discovers this file — no additional registration is required.
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "cwd": "/path/to/apex-mcp",
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
+    ```
+
+    Replace every `YOUR_*` placeholder with your actual Oracle and APEX credentials. The `cwd` field must point to the directory containing the `apex_mcp/` package — typically the cloned repo root.
+
+    | Variable | Description | Example |
+    |---|---|---|
+    | `ORACLE_DB_USER` | Oracle schema name | `TEA_APP` |
+    | `ORACLE_DB_PASS` | Oracle schema password | `MyPass@2024` |
+    | `ORACLE_DSN` | TNS alias or connect string | `mydb_tp` |
+    | `ORACLE_WALLET_DIR` | Directory containing `cwallet.sso` | `/opt/wallet` |
+    | `ORACLE_WALLET_PASSWORD` | Wallet encryption password | `walletpw` |
+    | `APEX_WORKSPACE_ID` | Numeric APEX workspace ID | `8822816515098715` |
+    | `APEX_SCHEMA` | Schema that owns APEX objects | `TEA_APP` |
+    | `APEX_WORKSPACE_NAME` | APEX workspace name | `TEA` |
+
+    <Note>
+      The `.mcp.json` file is automatically picked up when Claude Code is opened in the same directory. No separate `claude mcp add` command is needed.
+    </Note>
+  </Step>
+
+  <Step title="Verify with /mcp">
+    Open Claude Code in the project directory. Run the built-in MCP status command:
+
+    ```
+    /mcp
+    ```
+
+    You should see `apex-mcp` listed with status `connected` and **116 tools** available. If the server shows an error, check the troubleshooting table below.
+  </Step>
+
+  <Step title="Send your first prompt">
+    Claude will automatically call `apex_connect` and route subsequent calls to the right tools:
+
+    ```
+    Connect to the Oracle database and show me the available APEX applications in the workspace.
+    ```
+
+    From there you can build incrementally:
+
+    ```
+    Create a new APEX app with ID 200, name "Inventory Portal", then generate a CRUD page for the PRODUCTS table.
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Claude Desktop
+
+Claude Desktop uses a global JSON config file rather than a per-project `.mcp.json`. The JSON structure is identical — only the file location differs.
+
+<Steps>
+  <Step title="Locate the config file">
+    Find or create the `claude_desktop_config.json` file for your operating system:
+
+    | OS | Path |
+    |---|---|
+    | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+    | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+    | Linux | `~/.config/Claude/claude_desktop_config.json` |
+  </Step>
+
+  <Step title="Add apex-mcp to the config">
+    Open the config file and add the `apex-mcp` entry under `mcpServers`. If the file already has other servers, add a comma and the new block alongside them:
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "cwd": "/path/to/apex-mcp",
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
+    ```
+
+    <Note>
+      The JSON structure is exactly the same as the Claude Code `.mcp.json`. You can copy the `apex-mcp` block directly between the two files.
+    </Note>
+  </Step>
+
+  <Step title="Restart Claude Desktop">
+    Fully quit and relaunch Claude Desktop. The MCP server starts alongside the application. Look for the **hammer icon (🔨)** in the chat interface — it confirms that tools are available and apex-mcp is connected.
+  </Step>
+</Steps>
+
+---
+
+## Optional: Add SQLcl MCP alongside apex-mcp
+
+[SQLcl MCP](https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/) is an optional companion server that gives Claude direct SQL, PL/SQL, and DDL access with full audit logging. When both servers are running, Claude uses apex-mcp for APEX building and SQLcl MCP for data exploration and schema management.
+
+<Warning>
+  SQLcl 25.2 or later is required for the `-mcp` flag.
+</Warning>
+
+First, save a named connection in SQLcl so the server can authenticate without prompting:
+
+```bash
+sql /nolog
+```
+
+Inside SQLcl:
+
+```sql
+conn -save myconn -savepwd user/pass@dsn
+```
+
+Then add the `sqlcl` entry to your `.mcp.json` (or `claude_desktop_config.json`) alongside `apex-mcp`:
+
+```json
+{
+  "mcpServers": {
+    "apex-mcp": {
+      "command": "python",
+      "args": ["-m", "apex_mcp"],
+      "cwd": "/path/to/apex-mcp",
+      "env": {
+        "ORACLE_DB_USER": "YOUR_SCHEMA",
+        "ORACLE_DB_PASS": "YOUR_PASSWORD",
+        "ORACLE_DSN": "YOUR_DSN",
+        "ORACLE_WALLET_DIR": "/path/to/wallet",
+        "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+        "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+        "APEX_SCHEMA": "YOUR_SCHEMA",
+        "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+      }
+    },
+    "sqlcl": {
+      "command": "/path/to/sqlcl/bin/sql",
+      "args": ["-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+Run `/mcp` in Claude Code to verify both servers are listed as `connected`.
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `/mcp` shows no servers | Confirm `.mcp.json` is in the directory where Claude Code was launched |
+| `ModuleNotFoundError: apex_mcp` | Run `pip install -e .` from the apex-mcp repo directory |
+| `ORA-12541: no listener` | Check `ORACLE_DSN` matches a TNS alias in your `tnsnames.ora` |
+| `ORA-28759: failure to open file` | `ORACLE_WALLET_DIR` must point to the folder containing `cwallet.sso` |
+| `DPY-6005: cannot connect to database` | Verify `ORACLE_WALLET_PASSWORD` is correct |
+| Tool calls time out | The database connection is cold; call `apex_connect` explicitly first |
+| Server disconnects mid-session | Normal after long idle periods — apex-mcp auto-reconnects on the next tool call |
+| Hammer icon missing in Claude Desktop | Restart Claude Desktop; the MCP server only starts at launch |

@@ -1,0 +1,224 @@
+---
+title: "Build Your First Oracle APEX App with apex-mcp"
+sidebarTitle: "First App"
+description: "Step-by-step guide to building a complete Oracle APEX application using apex-mcp tools: connect, create, add pages, generate CRUD, add navigation, and finalize."
+---
+
+This guide walks through building a complete APEX application from scratch using apex-mcp's incremental build approach. Each step calls a single tool, and the session singleton tracks all created components so every subsequent call knows exactly what exists — no manual ID bookkeeping required.
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- **apex-mcp installed and connected** to your AI client (Claude Code, Cursor, VS Code, etc.). See the [quickstart](/quickstart) for setup.
+- **Oracle Database** with `EMPLOYEES` and `DEPARTMENTS` tables available (or substitute any two related tables from your own schema).
+- **APEX workspace** configured with the correct `APEX_WORKSPACE_ID`, `APEX_SCHEMA`, and `APEX_WORKSPACE_NAME` environment variables.
+
+<Note>
+  Don't have `EMPLOYEES` / `DEPARTMENTS`? The same steps work for any two tables. Just swap in your own table names and choose page IDs that don't conflict with existing pages.
+</Note>
+
+## Build the App
+
+<Steps>
+  <Step title="Connect to Oracle">
+    Establish the mTLS wallet connection to Oracle Autonomous Database. This must be the first call in every session.
+
+    ```python
+    apex_connect()
+    ```
+
+    On success you'll see connection metadata including schema name, APEX workspace, and server version. All subsequent tool calls reuse this connection.
+
+    <Tip>
+      Run `apex_status()` at any time to inspect the current connection state and session info.
+    </Tip>
+  </Step>
+
+  <Step title="Create the Application">
+    Create a new APEX application shell. This opens an import session — all components added afterward belong to this app.
+
+    ```python
+    apex_create_app(
+        app_id=200,
+        app_name="HR Portal",
+        app_alias="hr-portal",
+        login_page=101,
+        home_page=1,
+        language="en",
+        date_format="DD/MM/YYYY",
+        theme_style="REDWOOD_LIGHT",
+    )
+    ```
+
+    The `login_page` parameter tells APEX which page ID to use as the authentication gateway. The `home_page` is the default landing page after login.
+
+    <Warning>
+      App IDs must be unique within your workspace. Run `apex_list_apps()` first to check which IDs are already in use.
+    </Warning>
+  </Step>
+
+  <Step title="Add a Login Page">
+    Generate a professional login page with username and password fields, a Sign In button, and the APEX native authentication process wired up automatically.
+
+    ```python
+    apex_generate_login(
+        page_id=101,
+        page_name="Login",
+        app_name="HR Portal",
+        username_label="Username",
+        password_label="Password",
+        login_button_label="Sign In",
+    )
+    ```
+
+    This creates page 101 using the Login page template (centered, no navigation bar). The items `P101_USERNAME` and `P101_PASSWORD` are created automatically, along with the `apex_authentication.login()` PL/SQL process.
+
+    <Note>
+      The `page_id` here must match the `login_page` value you passed to `apex_create_app()`.
+    </Note>
+  </Step>
+
+  <Step title="Add a Dashboard Page">
+    Add the main landing page of the application. This creates a blank standard page that you can populate with charts and KPI cards.
+
+    ```python
+    apex_add_page(
+        page_id=1,
+        page_name="Dashboard",
+        page_mode="Normal",
+    )
+    ```
+
+    This creates an empty page. In later steps you can use `apex_add_metric_cards()` or `apex_generate_dashboard()` to populate it with live KPI data.
+  </Step>
+
+  <Step title="Generate CRUD for EMPLOYEES">
+    Generate a full Create/Read/Update/Delete module for the `EMPLOYEES` table. This single call introspects the table schema, creates both pages, and wires everything together.
+
+    ```python
+    apex_generate_crud(
+        table_name="EMPLOYEES",
+        list_page_id=10,
+        form_page_id=11,
+    )
+    ```
+
+    **What gets created automatically:**
+    - **Page 10** — Interactive Report listing all employees, with an edit link on each row and a "New" button
+    - **Page 11** — Form page with correctly-typed items for every column (text, number, date picker, select list for FKs)
+    - **LOVs** auto-created for any foreign key columns (e.g. `DEPARTMENT_ID` → dropdown of department names)
+    - **Save / Delete / Cancel** buttons with proper conditional display (Delete only shown when editing)
+    - **DML process** handling `INSERT`, `UPDATE`, and `DELETE` automatically
+
+    <Tip>
+      Run `apex_describe_table("EMPLOYEES")` before this step to preview what columns will become form items, and which are detected as PKs or FKs.
+    </Tip>
+  </Step>
+
+  <Step title="Generate CRUD for DEPARTMENTS">
+    Repeat for the `DEPARTMENTS` table on a separate page range.
+
+    ```python
+    apex_generate_crud(
+        table_name="DEPARTMENTS",
+        list_page_id=20,
+        form_page_id=21,
+    )
+    ```
+
+    Because `EMPLOYEES` has a foreign key to `DEPARTMENTS`, the LOV created for `DEPARTMENT_ID` in the previous step is reused — apex-mcp caches LOVs within the session and does not create duplicates.
+  </Step>
+
+  <Step title="Add Navigation">
+    Add navigation menu entries so users can reach every page from the APEX navigation bar.
+
+    ```python
+    apex_add_nav_item("Dashboard",    app_id=200, page_id=1,  icon="fa-home")
+    apex_add_nav_item("Employees",    app_id=200, page_id=10, icon="fa-users")
+    apex_add_nav_item("Departments",  app_id=200, page_id=20, icon="fa-building")
+    ```
+
+    Each call appends an entry to the application's navigation list. The `icon` parameter accepts any Font Awesome class name (prefixed with `fa-`).
+
+    <Tip>
+      Use `apex_add_nav_item()` with `parent_item="ParentLabel"` to create nested sub-menus for larger apps with many pages.
+    </Tip>
+  </Step>
+
+  <Step title="Finalize the Application">
+    Close the import session and commit all generated PL/SQL to the database. This is the last step in every build sequence.
+
+    ```python
+    apex_finalize_app()
+    ```
+
+    Without this call, the application exists in the import buffer but is not committed to the APEX repository. Always call `apex_finalize_app()` before running `apex_validate_app()` or accessing the app in a browser.
+  </Step>
+
+  <Step title="Validate the Application">
+    Run a structural health check on the finished application. Returns a quality score from 0–100 along with a list of any issues or warnings.
+
+    ```python
+    apex_validate_app()
+    ```
+
+    **What the validator checks:**
+    - Home page exists and is reachable
+    - Login page is properly configured
+    - No orphaned items (items referencing deleted regions)
+    - All navigation items point to valid pages
+    - All processes and branches have valid conditions
+
+    A score of 100/100 means no structural issues were detected.
+
+    ```json
+    {
+      "status": "ok",
+      "score": 98,
+      "issues": [],
+      "warnings": ["Page 10 has no authorization scheme"],
+      "summary": {
+        "pages": 5,
+        "regions": 8,
+        "items": 22,
+        "buttons": 12,
+        "processes": 6
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Accessing the App
+
+Once finalized and validated, navigate to your APEX instance and open the app using the URL pattern:
+
+```
+https://<your-apex-base-url>/ords/f?p=200
+```
+
+Replace `200` with your chosen `app_id`. APEX will redirect to the login page (page 101) for unauthenticated users.
+
+<Note>
+  The base URL depends on your Oracle Autonomous Database instance. For Oracle ADB it typically follows the pattern `https://<instance>.adb.<region>.oraclecloudapps.com/ords/`.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="CRUD Generation"
+    icon="table"
+    href="/guides/crud-generation"
+  >
+    Explore all CRUD generators — report pages with filters, modal forms, multi-step wizards, and full schema-to-app generation.
+  </Card>
+  <Card
+    title="Dashboards & Charts"
+    icon="chart-bar"
+    href="/guides/dashboards-charts"
+  >
+    Add Oracle JET charts, KPI metric cards, gauges, funnels, and full analytics pages to your app.
+  </Card>
+</CardGroup>

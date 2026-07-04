@@ -1,47 +1,149 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with apex-mcp in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install apex-mcp, configure your Oracle connection, connect Claude Code, and build your first Oracle APEX app with a natural language prompt."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through everything needed to go from zero to a running Oracle APEX application built entirely through natural language. You'll install apex-mcp from source, supply your Oracle ADB credentials in a single config file, verify the connection inside Claude Code, and then issue a multi-step natural language prompt that creates a complete APEX app — login page, CRUD pages, and navigation — without opening the App Builder UI once.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Install apex-mcp">
+    Clone the repository and install it in editable mode so the `apex-mcp` entry point is available on your PATH.
 
     ```bash
-    npm install your-package
+    git clone https://github.com/TechFernandesLTDA/apex-mcp
+    cd apex-mcp
+    pip install -e .
     ```
+
+    Verify the installation succeeded:
+
+    ```bash
+    apex-mcp --help
+    ```
+
+    You should see the argument parser output listing `--transport`, `--host`, `--port`, and `--path` options.
+
+    <Note>
+      Python 3.11 or newer is required. If your system default is older, use `python3.11 -m pip install -e .` and invoke via `python3.11 -m apex_mcp` in your config file.
+    </Note>
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Configure your Oracle credentials">
+    Create a file named `.mcp.json` in your project root (the directory you open in Claude Code). This file tells Claude Code how to launch the apex-mcp server process and which environment variables to pass to it.
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "cwd": "/path/to/apex-mcp",
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
     ```
+
+    Replace each placeholder with your actual values:
+
+    | Variable | What to put here |
+    |----------|-----------------|
+    | `ORACLE_DB_USER` | Oracle schema name (e.g. `MYAPP`) |
+    | `ORACLE_DB_PASS` | Schema password |
+    | `ORACLE_DSN` | TNS alias from your `tnsnames.ora` (e.g. `mydb_high`) |
+    | `ORACLE_WALLET_DIR` | Absolute path to the directory containing `cwallet.sso` |
+    | `ORACLE_WALLET_PASSWORD` | Wallet encryption password |
+    | `APEX_WORKSPACE_ID` | Numeric ID of your APEX workspace |
+    | `APEX_SCHEMA` | Schema that owns APEX objects (often same as `ORACLE_DB_USER`) |
+    | `APEX_WORKSPACE_NAME` | APEX workspace name (uppercase, e.g. `MYWORKSPACE`) |
+
+    <Tip>
+      To find your `APEX_WORKSPACE_ID`, run this query in SQL Developer or SQLcl while connected to your schema:
+
+      ```sql
+      SELECT workspace_id FROM apex_workspaces WHERE workspace = 'YOUR_WORKSPACE_NAME';
+      ```
+    </Tip>
+
+    <Warning>
+      Keep `.mcp.json` out of version control — it contains your database password and wallet password. Add it to `.gitignore` immediately.
+    </Warning>
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Verify the connection in Claude Code">
+    Open your project folder in Claude Code. The MCP server starts automatically when Claude Code loads the workspace.
+
+    Run the MCP status command in the Claude Code chat:
+
     ```
+    /mcp
+    ```
+
+    You should see `apex-mcp` listed as connected with **116 tools** available. If the server shows as disconnected, check the Claude Code output panel for error messages — most issues are a wrong path in `cwd` or a missing environment variable.
+
+    Once connected, test the Oracle connection with a natural language query:
+
+    ```
+    Connect to Oracle and list all APEX applications in the workspace.
+    ```
+
+    Claude Code will call `apex_connect()` followed by `apex_list_apps()` and display the results. If you see your workspace's application list, you're ready to build.
+
+    <Note>
+      If `apex_connect()` fails, the most common causes are a wrong `ORACLE_DSN` value (must match the alias in `tnsnames.ora` inside the wallet directory) or an incorrect `ORACLE_WALLET_DIR` path. See the [Configuration](/configuration) page for a full troubleshooting table.
+    </Note>
+  </Step>
+
+  <Step title="Build your first APEX app">
+    Paste this prompt into Claude Code to build a complete APEX application with a login page, CRUD pages for the EMPLOYEES table, and navigation — all in a single conversation turn:
+
+    ```
+    Connect to Oracle. Create an APEX app with ID 200 named 'My First App'.
+    Generate a login page on page 101.
+    Generate a CRUD page for the EMPLOYEES table starting at page 10.
+    Add navigation items and finalize the app.
+    ```
+
+    Claude Code will translate this into a sequence of tool calls and execute them one by one. You'll see each step in the tool-use panel as it runs.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## What Happens Behind the Scenes
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+When you send that final prompt, apex-mcp orchestrates the following tool sequence automatically:
+
+1. **`apex_connect()`** — establishes the mTLS wallet connection to Oracle ADB
+2. **`apex_create_app(app_id=200, app_name="My First App")`** — opens an APEX import session via `wwv_flow_imp_page.create_flow`
+3. **`apex_generate_login(page_id=101)`** — generates a full login page with APEX authentication
+4. **`apex_generate_crud(table_name="EMPLOYEES", start_page_id=10)`** — introspects the EMPLOYEES table (columns, PKs, FKs) and generates an Interactive Report list page plus a form page with DML processes
+5. **`apex_add_nav_item()`** — adds navigation menu entries for each generated page
+6. **`apex_finalize_app()`** — closes the import session and commits everything to the database
+
+Each tool call generates the corresponding `wwv_flow_imp_page.*` PL/SQL, which APEX executes in the same way its own import/export system works. The entire sequence for a simple CRUD app typically completes in under 10 seconds.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration Reference" icon="gear" href="/configuration">
+    Full reference for all environment variables, transport settings, and how to find your APEX workspace credentials.
+  </Card>
+  <Card title="Connect Claude Desktop" icon="comment" href="/clients/claude">
+    Set up apex-mcp in Claude Desktop using the `claude_desktop_config.json` format.
+  </Card>
+  <Card title="Build Your First App (Full Guide)" icon="hammer" href="/guides/build-first-app">
+    Step-by-step walkthrough of building a complete multi-table APEX application from schema discovery through validation.
+  </Card>
+  <Card title="Connection Tools Reference" icon="plug" href="/tools/connection">
+    Detailed reference for `apex_connect`, `apex_run_sql`, and `apex_status`.
+  </Card>
+</CardGroup>

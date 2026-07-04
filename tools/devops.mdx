@@ -1,0 +1,297 @@
+---
+title: "DevOps and Batch Operations Tools Reference"
+sidebarTitle: "DevOps & Batch"
+description: "Reference for apex-mcp DevOps tools: REST endpoint generation, page export as SQL, Markdown doc generation, batch mode execution, and app validation."
+---
+
+DevOps tools help integrate APEX development into CI/CD workflows and automate repetitive operations. Use them to expose database tables as ORDS REST APIs, export pages as portable SQL install scripts, generate living Markdown documentation, and batch-execute dozens of PL/SQL build operations in a single round-trip to minimize latency.
+
+---
+
+## REST Endpoint Generation
+
+### `apex_generate_rest_endpoints`
+
+Generate a complete set of ORDS REST endpoints for a database table using the ORDS PL/SQL API (`ORDS.DEFINE_MODULE` / `ORDS.DEFINE_TEMPLATE` / `ORDS.DEFINE_HANDLER`). All five standard CRUD operations are registered automatically in one call.
+
+The primary key column is auto-detected via `user_constraints` and `user_cons_columns`. Non-PK columns are discovered via `user_tab_columns` to build the `PUT` update handler's `SET` clause. The current schema is resolved from `SELECT USER FROM DUAL`.
+
+<ParamField path="table_name" type="string" required>
+  Name of the table to expose via REST (case-insensitive). Must pass SQL identifier validation.
+</ParamField>
+
+<ParamField path="base_path" type="string">
+  URL base path segment, e.g. `"orders"`. Defaults to `table_name` in lowercase. The ORDS module will be registered at `/{base_path}/`.
+</ParamField>
+
+<ParamField path="require_auth" type="boolean" default="true">
+  Whether the module requires authentication. Recorded in the response metadata and documentation. Note: actual ORDS privilege assignment must be configured separately in ORDS Admin.
+</ParamField>
+
+<ParamField path="pk_column" type="string">
+  Primary key column name. Auto-detected from `user_constraints` (type `'P'`) if omitted.
+</ParamField>
+
+<ParamField path="schema" type="string">
+  Database schema. Resolved via `SELECT USER FROM DUAL` if omitted.
+</ParamField>
+
+**Created endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/{base_path}/` | List all rows (collection feed, 25 per page) |
+| `POST` | `/{base_path}/` | Insert a new row |
+| `GET` | `/{base_path}/:{pk}` | Fetch a single row by primary key |
+| `PUT` | `/{base_path}/:{pk}` | Update a row by primary key |
+| `DELETE` | `/{base_path}/:{pk}` | Delete a row by primary key |
+
+**Returns:** JSON with `status`, `table_name`, `module_name`, `base_path`, `pk_column`, `require_auth`, and an `endpoints` array of `{method, path, description}` objects.
+
+<Note>
+  Requires `EXECUTE` privilege on the `ORDS` package. On Autonomous Database this is granted to schema users by default. The table must exist and be owned by the current schema.
+</Note>
+
+```json Example response
+{
+  "status": "ok",
+  "table_name": "ORDERS",
+  "module_name": "orders",
+  "base_path": "/orders/",
+  "pk_column": "ORDER_ID",
+  "require_auth": true,
+  "endpoints": [
+    { "method": "GET",    "path": "/orders/",          "description": "List all" },
+    { "method": "POST",   "path": "/orders/",          "description": "Create" },
+    { "method": "GET",    "path": "/orders/:order_id", "description": "Get by PK" },
+    { "method": "PUT",    "path": "/orders/:order_id", "description": "Update" },
+    { "method": "DELETE", "path": "/orders/:order_id", "description": "Delete" }
+  ]
+}
+```
+
+---
+
+## Page Export
+
+### `apex_export_page`
+
+Export a single APEX page as a SQL install script using Oracle's built-in `apex_export.get_page()` function (available in APEX 19+). The generated SQL is in `wwv_flow_imp` format — the same format used by APEX's native import/export system — and can be run against any compatible APEX instance to recreate the page.
+
+<ParamField path="app_id" type="integer" required>
+  Numeric application ID (e.g., `100`).
+</ParamField>
+
+<ParamField path="page_id" type="integer" required>
+  Numeric page ID to export (e.g., `1`).
+</ParamField>
+
+<ParamField path="output_path" type="string" default='""'>
+  Full file path where the SQL export should be saved, e.g. `"C:/myproject/apex/f100_p001.sql"`. When empty, only the first 32 KB of SQL is returned inline in the JSON response.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `page_id`, `file_name`, `total_length` (characters), `sql_preview` (first 32 KB), and optionally `saved_to` and `message`.
+
+<Note>
+  Very large pages (over 32 KB) are truncated in the JSON preview. Provide `output_path` to capture the full export. Requires `EXECUTE` on `apex_export`.
+</Note>
+
+```bash CI/CD usage
+# Export page 10 of app 200 to a versioned SQL file
+apex_export_page(app_id=200, page_id=10, output_path="./sql/f200_p010.sql")
+```
+
+---
+
+## Documentation Generation
+
+### `apex_generate_docs`
+
+Auto-generate Markdown documentation for an APEX application by querying the APEX data dictionary views (`APEX_APPLICATION_*`). The generated document covers app metadata, all pages, regions per page (with source previews), items per page, shared LOVs, and authorization schemes.
+
+<ParamField path="app_id" type="integer">
+  Application ID to document. Falls back to the current import session's `app_id` if omitted.
+</ParamField>
+
+**Returns:** JSON with `status`, `app_id`, `markdown` (the full Markdown string), and `stats` (a summary with `pages`, `regions`, `items`, `lovs`, `auth_schemes` counts).
+
+<Note>
+  The `region_source` column is a CLOB. Only the first 200 characters of each region's source are included in the documentation to keep output size manageable.
+</Note>
+
+**Output structure:**
+
+```markdown Generated Markdown structure
+# My App (App 200)
+
+**Alias**: MYAPP | **Pages**: 12 | **Schema**: HR | **Last updated**: 2025-01-15
+
+## Pages
+
+### Page 1: Dashboard
+**Auth**: — | **Mode**: Normal
+
+#### Regions
+| Region | Type | Source |
+...
+
+#### Items
+| Item | Type |
+...
+
+---
+
+## Shared LOVs (3)
+...
+
+## Auth Schemes (1)
+...
+```
+
+---
+
+## Batch Mode
+
+Batch mode queues multiple PL/SQL build operations in memory and flushes them to the database in a single round-trip when you call `apex_commit_batch()`. This dramatically reduces latency for complex app builds involving dozens of regions, items, and processes.
+
+### `apex_begin_batch`
+
+Start batch mode. All subsequent `db.plsql()` calls (issued by any apex-mcp build tool) are appended to an internal queue instead of executing immediately.
+
+No parameters.
+
+**Returns:** JSON confirmation that batch mode is active.
+
+<Note>
+  Dry-run mode takes precedence over batch mode. If dry-run is active, PL/SQL calls are still captured in the dry-run log, not the batch queue.
+</Note>
+
+---
+
+### `apex_commit_batch`
+
+Execute all queued batch operations in a single database round-trip, then commit. Each queued PL/SQL block is executed in order. Errors on individual statements are captured and reported but do not abort the remaining queue.
+
+No parameters. Rollback behavior is controlled by the underlying `db.commit_batch()` call:
+
+- **`rollback_on_error=True`** (default): If any statement fails, a full `ROLLBACK` is issued and all batch changes are undone.
+- **`rollback_on_error=False`**: A `COMMIT` is issued even if some statements failed (partial commit).
+
+**Returns:** JSON with `status` (`"ok"` or `"partial"`), `executed` (total statements attempted), `ok` (successful count), `errors` (failed count), and `log` (per-statement result strings of the form `"OK: ..."` or `"ERR: ..."`).
+
+<Warning>
+  Once `apex_commit_batch()` is called the queue is cleared regardless of outcome. On error with `rollback_on_error=True`, all changes are rolled back and must be re-queued.
+</Warning>
+
+### Batch Mode Example
+
+The following example batches the creation of multiple regions and items for a new page, executing everything in a single database round-trip:
+
+```python
+# 1. Connect and start an import session
+apex_connect()
+apex_create_app(app_id=300, app_name="Inventory", home_page=1)
+apex_add_page(page_id=1, page_name="Products", page_mode="Normal")
+
+# 2. Begin batch — all subsequent build calls are queued
+apex_begin_batch()
+
+# 3. Queue multiple operations (none execute yet)
+apex_add_region(
+    page_id=1,
+    region_name="Products Report",
+    region_type="INTERACTIVE_REPORT",
+    sql_source="SELECT * FROM PRODUCTS ORDER BY PRODUCT_NAME"
+)
+apex_add_item(page_id=1, item_name="P1_SEARCH", item_type="TEXT_FIELD", label="Search")
+apex_add_button(page_id=1, button_name="SEARCH", label="Search", region="Products Report")
+apex_add_process(
+    page_id=1,
+    process_name="Apply Search",
+    process_type="NATIVE_PLSQL",
+    plsql_code="NULL;"
+)
+
+# 4. Execute all queued operations in ONE round-trip; roll back everything on any error
+apex_commit_batch()
+# Returns: {"status": "ok", "executed": 4, "ok": 4, "errors": 0, "log": [...]}
+
+# 5. Finalize the app
+apex_finalize_app()
+```
+
+---
+
+## User Management
+
+User management tools create and list APEX workspace user accounts for the **APEX Accounts** authentication scheme. For applications using custom authentication (PL/SQL login), manage users in your own application table instead.
+
+### `apex_create_user`
+
+Create an APEX workspace user account by calling `apex_util.create_user()`.
+
+<ParamField path="username" type="string" required>
+  Login username. Alphanumeric characters, dots, and underscores are allowed. Best practice: use `"firstname.lastname"` or `"dept.role"` format.
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  Initial password. Minimum 6 characters. Mix of upper/lowercase recommended.
+</ParamField>
+
+<ParamField path="email" type="string" default='""'>
+  User email address. Used for password reset notifications.
+</ParamField>
+
+<ParamField path="first_name" type="string" default='""'>
+  User's first name.
+</ParamField>
+
+<ParamField path="last_name" type="string" default='""'>
+  User's last name.
+</ParamField>
+
+<ParamField path="workspace_id" type="integer">
+  Target workspace ID. Defaults to the workspace configured in the `APEX_WORKSPACE_ID` environment variable.
+</ParamField>
+
+**Returns:** JSON with `status`, `message`, `username`, `email`, `first_name`, `last_name`, and `workspace_id`.
+
+<Note>
+  Requires `EXECUTE` on `apex_util` and a connection as APEX workspace admin or a schema with APEX admin privileges. Returns a descriptive error if the username already exists.
+</Note>
+
+---
+
+### `apex_list_users`
+
+List all APEX workspace users by querying the `APEX_WORKSPACE_APEX_USERS` view.
+
+<ParamField path="workspace_id" type="integer">
+  Workspace ID to filter by. Defaults to the configured workspace. Falls back to listing all users visible to the current session if no rows are returned for the specified workspace.
+</ParamField>
+
+**Returns:** JSON with `status`, `workspace_id`, `count`, and a `users` array. Each user object contains `USER_NAME`, `EMAIL`, `DATE_CREATED`, `LAST_LOGIN`, and `ACCOUNT_LOCKED`.
+
+```json Example response
+{
+  "status": "ok",
+  "workspace_id": 1234567890,
+  "count": 2,
+  "users": [
+    {
+      "USER_NAME": "admin",
+      "EMAIL": "admin@example.com",
+      "DATE_CREATED": "2025-01-01 09:00",
+      "LAST_LOGIN": "2025-01-15 14:23",
+      "ACCOUNT_LOCKED": "N"
+    },
+    {
+      "USER_NAME": "jane.doe",
+      "EMAIL": "jane.doe@example.com",
+      "DATE_CREATED": "2025-01-10 11:15",
+      "LAST_LOGIN": null,
+      "ACCOUNT_LOCKED": "N"
+    }
+  ]
+}
+```

@@ -1,0 +1,159 @@
+---
+title: "Configure Oracle Connection and APEX Workspace"
+sidebarTitle: "Configuration"
+description: "Set all required environment variables for Oracle ADB mTLS connection, APEX workspace, and optional MCP transport settings in apex-mcp."
+---
+
+apex-mcp reads all configuration from environment variables at startup — there are no config files internal to the server itself. The simplest way to supply these variables is inside your AI client's MCP config file (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `.vscode/mcp.json` for VS Code), which scopes them to the server process so they don't pollute your shell environment. Missing required variables emit a `RuntimeWarning` at startup but do not crash the server, allowing unit tests to run without a live Oracle connection.
+
+## Required Oracle Connection Variables
+
+These five variables establish the mTLS wallet connection to Oracle Autonomous Database. All are required; the server will warn at startup if any are absent and `apex_connect()` will fail until they are set.
+
+<ParamField path="ORACLE_DB_USER" type="string" required>
+  Oracle schema name. This is the database username used to authenticate, not the APEX workspace name. Example: `MYAPP`.
+</ParamField>
+
+<ParamField path="ORACLE_DB_PASS" type="string" required>
+  Password for the Oracle schema specified in `ORACLE_DB_USER`.
+</ParamField>
+
+<ParamField path="ORACLE_DSN" type="string" required>
+  TNS alias or connect string for the database. This must exactly match an alias defined in the `tnsnames.ora` file inside your wallet directory. Example: `mydb_high`. Common aliases provided by Oracle ADB wallet downloads end in `_high`, `_medium`, or `_low`.
+</ParamField>
+
+<ParamField path="ORACLE_WALLET_DIR" type="string" required>
+  Absolute path to the directory that contains your Oracle wallet files (`cwallet.sso`, `ewallet.p12`, `tnsnames.ora`, `sqlnet.ora`). This is the directory you extract from the wallet zip downloaded from the Oracle Cloud Console. Example: `/home/user/wallets/mydb`.
+</ParamField>
+
+<ParamField path="ORACLE_WALLET_PASSWORD" type="string" required>
+  The encryption password for the wallet. This is the password you set (or was generated) when you downloaded the wallet from Oracle Cloud. It is used to decrypt `ewallet.p12`.
+</ParamField>
+
+## Required APEX Workspace Variables
+
+These three variables identify the APEX workspace and schema context. They are used by tools to scope queries and operations to the correct workspace.
+
+<ParamField path="APEX_WORKSPACE_ID" type="integer" required>
+  Numeric identifier for your APEX workspace. This is not the workspace name — it is an integer like `1234567890`. See [Finding Your Credentials](#finding-your-credentials) below for how to look this up.
+</ParamField>
+
+<ParamField path="APEX_SCHEMA" type="string" required>
+  The Oracle schema that owns your APEX application objects. In most setups this is the same value as `ORACLE_DB_USER`, but in multi-schema deployments it may differ. Example: `MYAPP`.
+</ParamField>
+
+<ParamField path="APEX_WORKSPACE_NAME" type="string" required>
+  The APEX workspace name as it appears in APEX Administration. This is typically uppercase. Example: `MYWORKSPACE`. Used in queries against `apex_applications` and `apex_workspaces` views.
+</ParamField>
+
+## Optional Transport Variables
+
+These variables control how the apex-mcp server exposes itself over the network. They have lower priority than the corresponding CLI flags (`--transport`, `--host`, `--port`, `--path`), so CLI flags always win if both are set.
+
+| Variable | CLI Flag | Default | Description |
+|----------|----------|---------|-------------|
+| `MCP_TRANSPORT` | `--transport` | `stdio` | Transport mode: `stdio`, `streamable-http`, or `sse`. Use `stdio` for local clients (Claude Code, Cursor, VS Code). Use `streamable-http` for OpenAI Agents SDK or remote access. |
+| `MCP_HOST` | `--host` | `127.0.0.1` | Host address to bind when using HTTP transports. Keep as `127.0.0.1` for local use; set to `0.0.0.0` only behind a reverse proxy. |
+| `MCP_PORT` | `--port` | `8000` | Port to listen on for HTTP transports. |
+| `MCP_PATH` | `--path` | `/mcp` (HTTP) or `/sse` | URL path for the MCP endpoint. Defaults differ by transport: streamable-http uses `/mcp`, SSE uses `/sse`. |
+
+<Warning>
+  When using `streamable-http` or `sse` transport, apex-mcp is a single-user server — the `ImportSession` singleton allows only one active `apex_create_app` → `apex_finalize_app` sequence at a time. For multi-user scenarios, run separate server instances on different ports.
+</Warning>
+
+## Example Configuration
+
+### Claude Code (`.mcp.json`)
+
+Create this file in your project root. Claude Code reads it automatically when the workspace is opened.
+
+```json
+{
+  "mcpServers": {
+    "apex-mcp": {
+      "command": "python",
+      "args": ["-m", "apex_mcp"],
+      "cwd": "/path/to/apex-mcp",
+      "env": {
+        "ORACLE_DB_USER": "YOUR_SCHEMA",
+        "ORACLE_DB_PASS": "YOUR_PASSWORD",
+        "ORACLE_DSN": "YOUR_DSN",
+        "ORACLE_WALLET_DIR": "/path/to/wallet",
+        "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+        "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+        "APEX_SCHEMA": "YOUR_SCHEMA",
+        "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+      }
+    }
+  }
+}
+```
+
+<Note>
+  The `cwd` field must point to the apex-mcp installation directory (where `pyproject.toml` lives). The `args` field uses `-m apex_mcp`, which is equivalent to calling the `apex-mcp` entry point directly. If you installed via `pip install -e .`, you can also use `"command": "apex-mcp"` with `"args": []`.
+</Note>
+
+Other AI clients use different config file formats and locations. See the dedicated setup guides for details:
+
+- [Claude Desktop](/clients/claude) — `claude_desktop_config.json` in the app data directory
+- [Cursor](/clients/cursor) — `.cursor/mcp.json` in your home or project directory
+- [VS Code / GitHub Copilot](/clients/vscode) — `.vscode/mcp.json` in your workspace
+
+## Finding Your Credentials
+
+### APEX Workspace ID
+
+The `APEX_WORKSPACE_ID` is a numeric value that is not immediately visible in the APEX App Builder UI. Query it directly from your Oracle schema:
+
+```sql
+SELECT workspace_id, workspace
+FROM apex_workspaces
+WHERE workspace = 'YOUR_WORKSPACE_NAME';
+```
+
+Run this in SQL Developer, SQLcl, or via `apex_run_sql` after connecting.
+
+### Wallet Location
+
+When you download an Oracle ADB wallet from the Oracle Cloud Console (**Database → DB Connection → Download Wallet**), you receive a ZIP file. Extract it to a permanent directory — that directory path is your `ORACLE_WALLET_DIR`. The directory should contain at minimum:
+
+```
+cwallet.sso
+ewallet.p12
+tnsnames.ora
+sqlnet.ora
+```
+
+The `ORACLE_DSN` value must match one of the alias names in `tnsnames.ora` inside this directory. Open `tnsnames.ora` in a text editor to see the available aliases.
+
+## Troubleshooting
+
+### Connection Issues
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `ORA-12541: no listener` | Wrong DSN value | Check that `ORACLE_DSN` exactly matches a TNS alias in `tnsnames.ora` inside `ORACLE_WALLET_DIR` |
+| `ORA-28759: failure to open file` | Wallet directory wrong | `ORACLE_WALLET_DIR` must be the directory containing `cwallet.sso` — not the zip file or a parent directory |
+| `DPY-6005: cannot connect to database` | Wallet password incorrect | Verify `ORACLE_WALLET_PASSWORD` against the password used when downloading or creating the wallet |
+| `ModuleNotFoundError: apex_mcp` | Package not installed | Run `pip install -e .` from the apex-mcp directory, or check that the `cwd` in your config points to the correct location |
+
+### APEX Issues
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `ORA-20987: APEX - Application not found` | Wrong app ID or workspace | Verify `APEX_WORKSPACE_ID` and run `apex_list_apps()` to see applications in the current workspace |
+| `ORA-01403: no data found` in item creation | Missing `p_attributes` on DatePicker | Fixed in v0.2.0 — ensure you are on the latest version |
+| `PLS-00306: wrong number of arguments` | Incorrect process parameter name | Use `p_process_success_message`, not `p_success_message` |
+| Buttons not showing on Standard pages | Wrong region position | Use content region positions (`CLOSE`/`CREATE`), not dialog footer positions |
+
+### HTTP Transport Issues
+
+| Problem | Solution |
+|---------|----------|
+| `ConnectionRefusedError` | Start the server first with `apex-mcp --transport streamable-http` before connecting a client |
+| `404 Not Found` at `/` | The default endpoint path is `/mcp`, not `/`. Use `curl http://127.0.0.1:8000/mcp` to test |
+| OpenAI SDK cannot connect | Ensure the `MCPServerStreamableHttp` URL in your Python code matches the `--path` setting on the server |
+
+<Tip>
+  Run `apex_check_requirements()` from your AI client after connecting to get a full diagnostic of your Oracle grants, APEX access, and workspace configuration. It returns a checklist with pass/fail status for each requirement.
+</Tip>

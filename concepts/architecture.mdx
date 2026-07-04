@@ -1,0 +1,129 @@
+---
+title: "apex-mcp Architecture: FastMCP, Oracle, and APEX"
+sidebarTitle: "Architecture"
+description: "How apex-mcp connects AI clients to Oracle APEX 24.2 via FastMCP 3.x, oracledb thin driver, and the wwv_flow_imp_page PL/SQL API."
+---
+
+apex-mcp acts as a bridge between AI clients and Oracle APEX 24.2, using FastMCP 3.x as the MCP framework. Instead of navigating the APEX App Builder UI, you describe what you want to an AI assistant, and apex-mcp translates those requests into direct PL/SQL calls against Oracle Autonomous Database — creating real, production-quality APEX applications in seconds.
+
+## System Architecture
+
+The following diagram shows how an AI client, apex-mcp, and Oracle work together:
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  AI Client (Claude / GPT / Gemini / Cursor / VS Code)           │
+│                                                                  │
+│  "Create a full HR app from the EMPLOYEES table"                 │
+└────────────────────────┬────────────────────────────────────────┘
+                         │ MCP (stdio or HTTP)
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  apex-mcp server (FastMCP 3.x, Python 3.11+)                    │
+│  116 tools across 17 categories                                  │
+└────────────────────────┬────────────────────────────────────────┘
+                         │ oracledb (mTLS)
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Oracle Autonomous Database 23ai                                 │
+│  wwv_flow_imp_page → APEX 24.2 App Builder                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The AI client communicates with apex-mcp over MCP (either stdio or HTTP transport). apex-mcp connects to Oracle ADB using the `oracledb` thin driver with mTLS wallet authentication — no Oracle Instant Client installation required.
+
+## Core Singletons
+
+apex-mcp is built around three module-level singletons that coordinate every tool call:
+
+### ConnectionManager (`db.py`)
+
+`ConnectionManager` is the thread-safe Oracle connection manager. It wraps the `oracledb` thin driver and provides:
+
+- **mTLS wallet authentication** — connects using wallet files (`cwallet.sso`) with no Instant Client dependency.
+- **Auto-reconnect** — detects and recovers from transient Oracle errors including `ORA-03113` (end-of-file on communication channel), `ORA-03114` (not connected), `ORA-12170` (connect timeout), and `ORA-25408` (cannot safely replay call).
+- **Dry-run mode** — when enabled, all PL/SQL is logged to an in-memory buffer and never executed. Call `apex_dry_run_preview(enabled=True)` to activate.
+- **Batch mode** — queues PL/SQL operations in memory and executes them all in a single DB round-trip when `apex_commit_batch()` is called.
+- **Version-safe column access** — the `safe_col()` / `column_exists()` methods guard against column-not-found errors when querying `apex_application_*` views that vary between APEX patch levels.
+
+The module-level `db` shortcut (from `apex_mcp.db`) is the instance all tools import.
+
+### ImportSession (`session.py`)
+
+`ImportSession` tracks every component created during the `apex_create_app()` → `apex_finalize_app()` lifecycle. It records:
+
+- **Pages** (`PageInfo`) — page ID, name, and type.
+- **Regions** (`RegionInfo`) — region ID, page ID, name, and type.
+- **Items** (`ItemInfo`) — item ID, page ID, name, and type.
+- **Buttons**, **LOVs**, **auth schemes**, **nav items** — all stored for cross-reference.
+- **Charts**, **processes**, **branches**, **dynamic actions** — tracked with full metadata.
+
+Tools use the session to resolve cross-references — for example, finding the correct region ID when adding an item, or confirming a page exists before adding a region to it. The session is thread-safe via `threading.RLock`. The module-level `session` shortcut from `apex_mcp.session` is the instance all tools share.
+
+### IdGenerator (`ids.py`)
+
+`IdGenerator` produces unique numeric IDs for every APEX component created within a session. IDs are generated from a base of `8,900,000,000,000,000` plus a random salt and an incrementing counter, ensuring they never collide with existing APEX objects. The generator maintains a named registry to prevent duplicate IDs within a single session and is automatically reset whenever `apex_create_app()` is called.
+
+## PL/SQL Generation Pattern
+
+All apex-mcp tools that create APEX components follow the same four-step pattern:
+
+1. **Generate a unique ID** via the `IdGenerator` singleton.
+2. **Build PL/SQL** that calls `wwv_flow_imp_page.*` or `wwv_flow_imp_shared.*` procedures.
+3. **Execute** via `db.plsql()`, which automatically respects dry-run and batch modes.
+4. **Register** the new component in the `ImportSession` for cross-reference tracking.
+
+The `wwv_flow_imp_page` API is the same mechanism APEX uses internally for its own import/export system. This approach bypasses the App Builder UI entirely and is fully compatible with APEX 24.2.13 / Universal Theme 42.
+
+## Tool Module Layout
+
+Tools are organized across 17 modules inside `apex_mcp/tools/`:
+
+| Module | Tags | Description |
+|---|---|---|
+| `sql_tools.py` | `connection` | `apex_connect`, `apex_run_sql`, `apex_status` |
+| `app_tools.py` | `app` | Create/finalize/delete/export apps, dry-run mode |
+| `page_tools.py` | `page` | Add/list pages |
+| `component_tools.py` | `component` | Regions, items, buttons, processes, dynamic actions |
+| `shared_tools.py` | `shared` | LOVs, auth schemes, nav items, app items/processes |
+| `schema_tools.py` | `schema` | List/describe tables, detect FK relationships |
+| `generator_tools.py` | `generator` | High-level CRUD, dashboard, and login generators |
+| `inspect_tools.py` | `inspect` | Read/update/delete existing app components, diff |
+| `user_tools.py` | `user` | Create/list APEX workspace users |
+| `js_tools.py` | `javascript` | Page JS, global JS, AJAX callback handlers |
+| `validation_tools.py` | `validation` | Item validations and computations |
+| `visual_tools.py` | `visual` | JET charts, gauges, funnels, sparklines, calendars |
+| `devops_tools.py` | `devops` | REST endpoints, page export, docs generation, batch mode |
+| `advanced_tools.py` | `advanced` | Interactive grids, master-detail, timelines, faceted search, and more |
+| `setup_tools.py` | `setup` | Setup guide, requirements check, permission check/fix |
+| `ui_tools.py` | `ui` | 20 rich HTML components: hero banners, KPI rows, leaderboards, etc. |
+| `chart_tools.py` | `chart` | 10 advanced chart types: stacked, combo, pareto, scatter, bubble, etc. |
+
+## MCP Resources
+
+apex-mcp exposes six read-only data sources via MCP resources (`apex://` URIs). Resources return live data from Oracle without modifying any state:
+
+| URI | Description |
+|---|---|
+| `apex://config` | Current configuration and connection status (user, DSN, workspace, APEX version) |
+| `apex://session` | Active import session state: app ID, page count, region count, component counts |
+| `apex://schema/tables` | All tables in the current Oracle schema with row counts (requires connection) |
+| `apex://schema/tables/{table_name}` | Column metadata, primary keys, and foreign keys for a specific table |
+| `apex://apps` | All APEX applications in the current workspace with page counts |
+| `apex://apps/{app_id}` | Detailed metadata and full page list for a specific application |
+
+## MCP Prompts
+
+apex-mcp provides five workflow templates via MCP prompts. Prompts return step-by-step tool sequences that guide the AI through common multi-tool workflows:
+
+| Prompt | Parameters | Description |
+|---|---|---|
+| `create_crud_app` | `table_name`, `app_id`, `app_name` | Full CRUD app for a single database table |
+| `create_dashboard_app` | `app_id`, `app_name` | Analytics dashboard with charts and KPI cards |
+| `create_full_app_from_schema` | _(none)_ | Auto-generate a complete app from all schema tables |
+| `inspect_existing_app` | `app_id` | Thorough inspection of an existing app with recommendations |
+| `add_rest_api` | `table_name` | Expose a table as ORDS REST endpoints (GET/POST/PUT/DELETE) |
+
+<Note>
+**Single-user constraint:** `ImportSession` is a module-level singleton, which means only one active import session can exist at a time per server process. In HTTP transport mode (`--transport streamable-http` or `--transport sse`), concurrent `apex_create_app()` calls from different clients would share and corrupt the same session state. For multi-user scenarios, run separate apex-mcp instances on different ports.
+</Note>

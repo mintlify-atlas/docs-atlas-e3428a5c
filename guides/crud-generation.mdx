@@ -1,0 +1,315 @@
+---
+title: "Generate CRUD Pages for Oracle Database Tables"
+sidebarTitle: "CRUD Generation"
+description: "Use apex_generate_crud and apex_generate_from_schema to automatically create Interactive Report list pages, form pages, and DML processes for any Oracle table."
+---
+
+apex-mcp provides multiple tools to generate CRUD (Create, Read, Update, Delete) functionality for Oracle tables. From a single-table list/form pair all the way up to a complete multi-table application from schema, the generators introspect your Oracle data dictionary automatically — no manual column mapping required.
+
+## `apex_generate_crud` — Single Table CRUD
+
+The most commonly used generator. Give it a table name and two page IDs and it creates a fully wired CRUD module: an Interactive Report list page linked to an editable form page, with LOVs, DML, and navigation all handled automatically.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `table_name` | `str` | Oracle table name (case-insensitive) |
+| `list_page_id` | `int` | Page ID for the Interactive Report list page |
+| `form_page_id` | `int` | Page ID for the edit form page |
+| `list_page_name` | `str` | Display name for the list page (defaults to humanized table name) |
+| `form_page_name` | `str` | Display name for the form page (defaults to `"Edit {list_page_name}"`) |
+| `include_search` | `bool` | Add a search bar to the IR (default `True`) |
+| `auth_scheme` | `str` | Authorization scheme name to protect both pages |
+| `audit_columns` | `list[str]` | Column names to exclude from forms (defaults to standard audit columns: `CREATED_ON`, `UPDATED_ON`, etc.) |
+| `editable` | `bool` | When `False`, form items render as display-only and Save/Delete buttons are omitted |
+| `items_per_page` | `int` | Rows per page in the Interactive Report (default `15`) |
+| `button_labels` | `dict` | Custom labels for buttons: `new`, `save`, `cancel`, `delete`, `confirm_delete` |
+
+### What Gets Created
+
+- **List page** (`list_page_id`) — Interactive Report region with all table columns, an edit link on each row, and a "New" button in the search bar area
+- **Form page** (`form_page_id`) — Standard form region with:
+  - All columns as correctly-typed APEX items (inferred from column name patterns and Oracle data types)
+  - LOVs auto-created for any foreign key columns
+  - **Save** button (hot, top-right), **Delete** button (visible only when editing an existing record), **Cancel** button (returns to list)
+  - Automatic DML process handling `INSERT`, `UPDATE`, and `DELETE` via `NATIVE_FORM_DML`
+  - Post-submit redirect back to the list page
+
+### Column Type Inference
+
+apex-mcp infers the best APEX item type for each column using naming conventions and Oracle data types:
+
+| Rule | Inferred Type |
+|------|--------------|
+| Primary key column | `NATIVE_HIDDEN` |
+| Foreign key column | `NATIVE_SELECT_LIST` (+ auto LOV) |
+| Column name starts with `FL_` | `NATIVE_YES_NO` switch |
+| Column name starts with `DT_` | `NATIVE_DATE_PICKER_APEX` |
+| Column name starts with `NR_` | `NATIVE_NUMBER_FIELD` |
+| Oracle `DATE` / `TIMESTAMP*` | `NATIVE_DATE_PICKER_APEX` |
+| Oracle `NUMBER` / `FLOAT` / `INTEGER` | `NATIVE_NUMBER_FIELD` |
+| Oracle `CLOB` / `LONG` or length > 4000 | `NATIVE_TEXTAREA` |
+| Oracle `BLOB` | Skipped (not renderable as form item) |
+| Everything else | `NATIVE_TEXT_FIELD` |
+
+### Example
+
+```python
+apex_generate_crud(
+    table_name="ORDERS",
+    list_page_id=10,
+    form_page_id=11,
+    items_per_page=20,
+    button_labels={
+        "new": "New Order",
+        "save": "Save Order",
+        "delete": "Cancel Order",
+        "confirm_delete": "Are you sure you want to cancel this order?",
+    },
+)
+```
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "table": "ORDERS",
+  "list_page_id": 10,
+  "form_page_id": 11,
+  "pages_created": [10, 11],
+  "items_created": ["P11_ORDER_ID", "P11_CUSTOMER_ID", "P11_ORDER_DATE", "P11_STATUS"],
+  "lovs_created": ["LOV_CUSTOMER_ID"],
+  "summary": {
+    "columns_found": 8,
+    "pk_columns": ["ORDER_ID"],
+    "pk_type": "simple",
+    "fk_columns": ["CUSTOMER_ID"],
+    "items_on_form": 6,
+    "lovs": 1,
+    "skipped_blobs": []
+  }
+}
+```
+
+<Tip>
+  Run `apex_describe_table("ORDERS")` before generating CRUD to preview what columns will be detected as PKs and FKs. This helps you anticipate which LOVs will be auto-created.
+</Tip>
+
+---
+
+## `apex_generate_from_schema` — Full App from Multiple Tables
+
+The highest-level generator. Give it a list of tables and it creates CRUD pages for each one, plus a dashboard with KPI count cards and navigation menu entries — a complete working application in a single call.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tables` | `list[str]` | Table names to generate CRUDs for |
+| `start_page_id` | `int` | First page ID (default `10`). Pages allocated as `10/11`, `12/13`, `14/15`… |
+| `include_dashboard` | `bool` | Generate a dashboard page (page 1) with record counts (default `True`) |
+| `nav_icon_map` | `dict[str, str]` | Map of table name → Font Awesome icon class |
+
+### What Gets Created
+
+For each table: a CRUD list/form pair (2 pages each).
+If `include_dashboard=True`: page 1 with KPI metric cards showing `COUNT(*)` for every table.
+Navigation menu entries for all pages.
+
+### Example
+
+```python
+apex_generate_from_schema(
+    tables=["EMPLOYEES", "DEPARTMENTS", "JOBS"],
+    start_page_id=10,
+    include_dashboard=True,
+    nav_icon_map={
+        "EMPLOYEES":   "fa-users",
+        "DEPARTMENTS": "fa-building",
+        "JOBS":        "fa-briefcase",
+    },
+)
+```
+
+This single call creates 7 pages (1 dashboard + 3×2 CRUD pages), 3 navigation items, and auto-detects FK relationships to wire up LOV dropdowns across tables.
+
+<Note>
+  `apex_generate_from_schema` requires an active import session. Call `apex_create_app()` before using it, and `apex_finalize_app()` after.
+</Note>
+
+---
+
+## `apex_generate_report_page` — IR Report with Filters
+
+Creates a report page with an Interactive Report and optional filter items at the top. Useful when you need a read-only report with user-controlled filtering rather than a full CRUD module.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page_id` | `int` | Page ID |
+| `page_name` | `str` | Display name |
+| `sql_query` | `str` | SQL for the Interactive Report (can reference filter items as bind variables) |
+| `filter_items` | `list[dict]` | Filter field definitions (see below) |
+| `title` | `str` | Region title (defaults to `page_name`) |
+| `auth_scheme` | `str` | Authorization scheme name |
+| `include_export` | `bool` | Show CSV/Excel/PDF export button (default `True`) |
+
+Each `filter_items` entry is a dict:
+```python
+{
+    "name": "STATUS",          # item name suffix — becomes P{page_id}_STATUS
+    "label": "Status",         # display label
+    "type": "select",          # "text" | "select" | "date" | "number"
+    "lov": "SELECT DISTINCT DS_STATUS d, DS_STATUS r FROM ORDERS ORDER BY 1",
+}
+```
+
+### Example
+
+```python
+apex_generate_report_page(
+    page_id=30,
+    page_name="Order History",
+    sql_query="""
+        SELECT o.order_id, c.customer_name, o.order_date, o.status, o.total_amount
+          FROM orders o
+          JOIN customers c ON c.customer_id = o.customer_id
+         WHERE (:P30_STATUS IS NULL OR o.status = :P30_STATUS)
+           AND (:P30_DATE_FROM IS NULL OR o.order_date >= TO_DATE(:P30_DATE_FROM, 'DD/MM/YYYY'))
+    """,
+    filter_items=[
+        {"name": "STATUS",    "label": "Status",    "type": "select",
+         "lov": "SELECT DISTINCT status d, status r FROM orders ORDER BY 1"},
+        {"name": "DATE_FROM", "label": "From Date", "type": "date"},
+    ],
+)
+```
+
+---
+
+## `apex_generate_modal_form` — Inline Modal Popup Form
+
+Creates a modal dialog region on an existing page using Universal Theme's `t-DialogRegion` CSS classes — no separate modal page needed. Useful for quick inline edits without leaving the current page.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page_id` | `int` | Page ID where the modal lives (must already exist) |
+| `region_name` | `str` | Display name of the modal region |
+| `table_name` | `str` | Target table name (used for the auto-generated Save process) |
+| `pk_item_name` | `str` | Primary key item name (auto-prefixed with `P{page_id}_` if needed) |
+| `title` | `str` | Modal dialog header title |
+| `sequence` | `int` | Display sequence (default `10`) |
+
+### Example
+
+```python
+result = apex_generate_modal_form(
+    page_id=10,
+    region_name="Quick Edit Order",
+    table_name="ORDERS",
+    pk_item_name="ORDER_ID",
+    title="Edit Order",
+)
+```
+
+The returned `region_static_id` is what you reference from JavaScript to show the dialog:
+
+```javascript
+// In a Dynamic Action or button click handler:
+apex.region('modal_quick_edit_order').show();
+```
+
+<Note>
+  The modal form creates a hidden PK item and a basic `INSERT/UPDATE` PL/SQL process. Add additional form items inside the modal region using `apex_add_item()` after calling `apex_generate_modal_form()`.
+</Note>
+
+---
+
+## `apex_generate_wizard` — Multi-Step Wizard
+
+Generates a multi-step wizard (2–6 steps) where each step is a separate APEX page. Includes a progress bar, Previous/Next buttons, and a final redirect on completion.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `start_page_id` | `int` | First step page ID. Each subsequent step uses `start_page_id + 1`, `+2`, etc. |
+| `steps` | `list[dict]` | Step definitions (see below) |
+| `wizard_title` | `str` | Wizard header title |
+| `auth_scheme` | `str` | Authorization scheme name |
+| `finish_redirect_page` | `int` | Page to redirect to when the final step is submitted (default: page 1) |
+
+Each `steps` entry:
+```python
+{
+    "title": "Step 1: Basic Info",
+    "items": [
+        {"name": "FIRST_NAME", "label": "First Name", "type": "text",   "required": True},
+        {"name": "LAST_NAME",  "label": "Last Name",  "type": "text",   "required": True},
+        {"name": "HIRE_DATE",  "label": "Hire Date",  "type": "date"},
+        {"name": "DEPT_ID",    "label": "Department", "type": "select",
+         "lov": "SELECT ds_nome d, id_dept r FROM departments ORDER BY 1"},
+    ],
+}
+```
+
+### Example
+
+```python
+apex_generate_wizard(
+    start_page_id=50,
+    wizard_title="New Employee Onboarding",
+    finish_redirect_page=1,
+    steps=[
+        {
+            "title": "Step 1: Personal Info",
+            "items": [
+                {"name": "FIRST_NAME", "label": "First Name", "type": "text", "required": True},
+                {"name": "LAST_NAME",  "label": "Last Name",  "type": "text", "required": True},
+                {"name": "EMAIL",      "label": "Email",       "type": "text", "required": True},
+            ],
+        },
+        {
+            "title": "Step 2: Position",
+            "items": [
+                {"name": "JOB_ID",     "label": "Job Title",   "type": "select",
+                 "lov": "SELECT job_title d, job_id r FROM jobs ORDER BY 1"},
+                {"name": "HIRE_DATE",  "label": "Start Date",  "type": "date", "required": True},
+                {"name": "SALARY",     "label": "Salary",      "type": "number"},
+            ],
+        },
+        {
+            "title": "Step 3: Department",
+            "items": [
+                {"name": "DEPT_ID",    "label": "Department",  "type": "select",
+                 "lov": "SELECT department_name d, department_id r FROM departments ORDER BY 1"},
+                {"name": "MANAGER_ID", "label": "Manager",     "type": "select",
+                 "lov": "SELECT first_name||' '||last_name d, employee_id r FROM employees ORDER BY 1"},
+            ],
+        },
+    ],
+)
+```
+
+This creates pages 50, 51, and 52. Each page includes a progress bar showing which step is active, Previous/Next buttons, and item session-state persistence so values carry forward.
+
+---
+
+## Tips
+
+<Tip>
+  **Always introspect first.** Run `apex_describe_table("MY_TABLE")` before generating CRUD. It shows columns, data types, PKs, and FKs — helping you predict exactly what items and LOVs will be created.
+</Tip>
+
+<Tip>
+  **Understand relationships.** Run `apex_detect_relationships(["TABLE_A", "TABLE_B", "TABLE_C"])` before using `apex_generate_from_schema`. It shows which tables are parents vs. detail tables and suggests whether to use `master_detail` or `select_lov` components for each FK.
+</Tip>
+
+<Note>
+  `audit_columns` are automatically excluded from forms. The default exclusion list covers English (`CREATED_ON`, `UPDATED_ON`, `CREATED_BY`, `UPDATED_BY`, `CREATED_DATE`, `LAST_UPDATE_DATE`) and Portuguese (`DT_CRIACAO`, `DT_ATUALIZACAO`, `DS_CRIADO_POR`) naming conventions. Pass a custom `audit_columns` list to `apex_generate_crud` to override.
+</Note>

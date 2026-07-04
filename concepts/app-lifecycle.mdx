@@ -1,0 +1,127 @@
+---
+title: "APEX Application Build Lifecycle in apex-mcp"
+sidebarTitle: "App Lifecycle"
+description: "Every apex-mcp app build follows a strict lifecycle: connect, create, add components, finalize. Learn the correct order and what each phase does."
+---
+
+apex-mcp enforces a strict lifecycle for creating APEX applications. Every tool call that creates a page, region, item, or any other component depends on the import session being properly initialized — and that session must be cleanly closed when you're done. Understanding this four-phase lifecycle prevents the most common errors and ensures every application is committed correctly to the database.
+
+## Lifecycle Phases
+
+<Steps>
+  <Step title="Connect">
+    Call `apex_connect()` to establish the Oracle database connection via your mTLS wallet. This must be done before any other operation — all subsequent tool calls require an active connection.
+
+    ```python
+    apex_connect()
+    ```
+
+    `apex_connect()` uses the Oracle credentials and wallet path from your environment variables (`ORACLE_DB_USER`, `ORACLE_DB_PASS`, `ORACLE_DSN`, `ORACLE_WALLET_DIR`, `ORACLE_WALLET_PASSWORD`). Once connected, the `ConnectionManager` singleton keeps the connection alive and auto-reconnects on transient Oracle errors.
+
+    <Tip>
+      You can verify the connection and session state at any time by calling `apex_status()` or reading the `apex://config` and `apex://session` MCP resources.
+    </Tip>
+  </Step>
+
+  <Step title="Create App">
+    Call `apex_create_app(app_id, app_name)` to initialize a new import session. This call does two things:
+
+    - Starts the `wwv_flow_imp_page` import sequence in Oracle, registering a new application under your APEX workspace.
+    - Resets the `ImportSession` singleton and the `IdGenerator`, clearing any state from a previous session.
+
+    ```python
+    apex_create_app(app_id=200, app_name="My App")
+    ```
+
+    After this call, the `ImportSession` tracks every component you create. The `IdGenerator` starts fresh, producing IDs that won't collide with any previously created components.
+  </Step>
+
+  <Step title="Add Components">
+    With an active session, call any combination of component tools to build out the application. Tools can be called in any order within this phase, though logical dependencies apply (for example, a region must exist before you can add items to it).
+
+    Common operations in this phase include:
+
+    - `apex_add_page()` — add a new page
+    - `apex_generate_login()` — generate a standard login page (page 101)
+    - `apex_add_region()` — add a region to a page
+    - `apex_add_item()` — add a form field
+    - `apex_add_button()` — add a button
+    - `apex_add_lov()` — add a List of Values
+    - `apex_add_auth_scheme()` — add an authorization scheme
+    - `apex_add_nav_item()` — add a navigation menu item
+    - `apex_generate_crud()` — generate a full IR list + form page pair
+    - `apex_generate_dashboard()` — generate a dashboard with charts and KPIs
+    - `apex_add_jet_chart()`, `apex_add_metric_cards()` — add visualizations
+
+    All tools in this phase respect batch mode and dry-run mode if either is active.
+  </Step>
+
+  <Step title="Finalize">
+    Call `apex_finalize_app()` to close the import session and commit all changes to the database. This is a required step — without it, the application will be incomplete or missing its closing import markers in Oracle.
+
+    ```python
+    apex_finalize_app()
+    ```
+
+    After finalization, the app is immediately accessible in APEX App Builder and can be run at `f?p={app_id}` relative to your APEX base URL.
+
+    <Warning>
+      Always call `apex_finalize_app()` after adding all components. If your AI session ends or the server restarts before finalization, the partially created application will be left in an inconsistent state in the database.
+    </Warning>
+  </Step>
+</Steps>
+
+## Quick Build Pattern
+
+The following pattern (from the apex-mcp system instructions) shows a complete, minimal app build from connect to finalize:
+
+```python
+apex_connect()
+apex_create_app(app_id=200, app_name="My App")
+apex_generate_login(page_id=101)
+apex_add_page(1, "Dashboard", "blank")
+apex_generate_dashboard(page_id=1)
+apex_generate_crud("MY_TABLE", 10, 11)
+apex_add_nav_item("Dashboard", 1, 10, "fa-home")
+apex_add_nav_item("Records", 10, 20, "fa-table")
+apex_finalize_app()
+```
+
+This sequence produces a functional app with a login page, a dashboard, a full CRUD interface for `MY_TABLE`, and navigation — in a single round of tool calls.
+
+## Working with Existing Apps
+
+Not every workflow requires creating a new app. To inspect or modify an existing application, you only need a connection — no `apex_create_app()` or `apex_finalize_app()` required:
+
+```python
+apex_connect()
+apex_list_apps()                          # discover all apps in the workspace
+apex_get_app_details(app_id=200)          # get full metadata for app 200
+apex_get_page_details(app_id=200, page_id=1)   # inspect page 1
+apex_list_regions(app_id=200, page_id=1)       # see all regions
+apex_update_region(...)                   # modify a region
+```
+
+Inspection and update operations work directly against the live APEX data dictionary views — they do not go through the import session lifecycle.
+
+## Session State
+
+The `apex://session` MCP resource shows the current import session state at any point during the lifecycle. You can read it to confirm which components have been registered:
+
+```json
+{
+  "app_id": 200,
+  "app_name": "My App",
+  "import_begun": true,
+  "import_ended": false,
+  "pages": 3,
+  "regions": 7,
+  "items": 12,
+  "lovs": 2,
+  "nav_items": 3
+}
+```
+
+## Item Naming Convention
+
+All form items follow the APEX naming convention `P{page_id}_{COLUMN_NAME}`. apex-mcp tools apply this prefix automatically — you pass the column name and the page ID, and the full item name is constructed for you. For example, adding an item for the `EMPLOYEE_NAME` column on page 10 produces the item `P10_EMPLOYEE_NAME`.

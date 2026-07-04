@@ -1,0 +1,410 @@
+---
+title: "Build Dashboards and Add Charts to APEX Pages"
+sidebarTitle: "Dashboards & Charts"
+description: "Add Oracle JET charts, metric cards, gauges, and analytics pages to Oracle APEX 24.2 applications using apex-mcp visual and chart tools."
+---
+
+apex-mcp provides a rich set of chart and visualization tools built on Oracle JET and HTML regions. From simple KPI cards to animated counters, stacked bar charts, Pareto analysis, and bubble plots, every visualization is generated as native APEX components using the `wwv_flow_imp_page` API — fully compatible with APEX 24.2 Universal Theme 42.
+
+## Dashboard Generators
+
+### `apex_generate_dashboard`
+
+Creates a complete dashboard page in one call: KPI metric cards at the top and an Interactive Report at the bottom. If the page already exists in the session, content is added to it rather than recreating the page.
+
+```python
+apex_generate_dashboard(
+    page_id=1,
+    page_name="Dashboard",
+    kpi_queries=[
+        {"title": "Total Employees", "sql": "SELECT COUNT(*) FROM EMPLOYEES",   "icon": "fa-users",    "color": "u-color-1"},
+        {"title": "Departments",     "sql": "SELECT COUNT(*) FROM DEPARTMENTS", "icon": "fa-building", "color": "u-color-2"},
+        {"title": "Open Jobs",       "sql": "SELECT COUNT(*) FROM JOBS",        "icon": "fa-briefcase","color": "u-color-3"},
+        {"title": "Avg Salary",      "sql": "SELECT ROUND(AVG(SALARY)) FROM EMPLOYEES", "icon": "fa-dollar","color": "u-color-4"},
+    ],
+    ir_sql="SELECT employee_id, first_name, last_name, hire_date, salary FROM employees ORDER BY hire_date DESC",
+    ir_title="Recent Hires",
+)
+```
+
+The KPI cards are rendered as a Universal Theme 42 `t-Cards` grid with animated color fills. Colors accept `u-color-1` through `u-color-12` (UT42 utility classes) or hex values.
+
+---
+
+### `apex_generate_analytics_page`
+
+Creates a full analytics page with multiple metric cards and charts in a single call. Ideal for building reporting dashboards with several visualizations side by side.
+
+```python
+apex_generate_analytics_page(
+    page_id=61,
+    page_name="HR Analytics",
+    metrics=[
+        {"label": "Active Employees", "sql": "SELECT COUNT(*) FROM EMPLOYEES",            "icon": "fa-users",    "color": "#1E88E5"},
+        {"label": "Avg Salary",       "sql": "SELECT ROUND(AVG(SALARY)) FROM EMPLOYEES", "icon": "fa-dollar",   "color": "#00995D"},
+        {"label": "Departments",      "sql": "SELECT COUNT(*) FROM DEPARTMENTS",          "icon": "fa-building", "color": "#FF9800"},
+        {"label": "Open Positions",   "sql": "SELECT COUNT(*) FROM JOBS",                 "icon": "fa-briefcase","color": "#8E24AA"},
+    ],
+    charts=[
+        {
+            "region_name": "Employees by Department",
+            "chart_type":  "bar",
+            "sql_query":   "SELECT d.department_name AS LABEL, COUNT(*) AS VALUE FROM employees e JOIN departments d ON d.department_id = e.department_id GROUP BY d.department_name ORDER BY 2 DESC",
+        },
+        {
+            "region_name": "Salary Distribution",
+            "chart_type":  "pie",
+            "sql_query":   "SELECT job_id AS LABEL, COUNT(*) AS VALUE FROM employees GROUP BY job_id ORDER BY 2 DESC",
+        },
+    ],
+)
+```
+
+---
+
+## JET Charts — `apex_add_jet_chart`
+
+Add an Oracle JET chart region to any existing page. Supports all major chart types.
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `page_id` | `int` | Page ID |
+| `region_name` | `str` | Region display name |
+| `chart_type` | `str` | Chart type (see table below) |
+| `sql_query` | `str` | SQL returning `LABEL` and `VALUE` columns |
+| `series_name` | `str` | Legend label for the data series |
+| `height` | `int` | Chart height in pixels (default `300`) |
+| `orientation` | `str` | `"vertical"` (default) or `"horizontal"` |
+| `sequence` | `int` | Region display sequence |
+
+### Supported Chart Types
+
+| `chart_type` | Description |
+|-------------|-------------|
+| `"bar"` | Vertical bar chart — comparisons across categories |
+| `"bar_horizontal"` | Horizontal bar — good for ranked category labels |
+| `"line"` | Line chart — trends over time |
+| `"area"` | Filled area chart — cumulative data |
+| `"pie"` | Pie chart — distribution (8–10 slices max) |
+| `"donut"` | Donut chart — distribution with center hole |
+
+### SQL Aliasing Requirement
+
+<Warning>
+  Chart SQL **must** use the exact column aliases shown below. The APEX JET chart plugin maps columns by name, not position.
+</Warning>
+
+All standard JET charts require:
+```sql
+SELECT <category_expression> AS LABEL,
+       <numeric_expression>  AS VALUE
+  FROM your_table
+ ORDER BY ...
+```
+
+### Example
+
+```python
+apex_add_jet_chart(
+    page_id=1,
+    region_name="Employees by Department",
+    chart_type="bar",
+    sql_query="""
+        SELECT d.department_name AS LABEL,
+               COUNT(*)          AS VALUE
+          FROM employees e
+          JOIN departments d ON d.department_id = e.department_id
+         GROUP BY d.department_name
+         ORDER BY 2 DESC
+    """,
+    series_name="Headcount",
+    height=320,
+    sequence=20,
+)
+```
+
+---
+
+## Metric Cards — `apex_add_metric_cards`
+
+KPI cards with gradient, flat, or outline styling. Each card displays a live count or value from a SQL query alongside an icon and color theme.
+
+```python
+apex_add_metric_cards(
+    page_id=1,
+    region_name="HR KPIs",
+    style="gradient",          # "gradient" | "flat" | "outline"
+    columns=4,                 # cards per row
+    metrics=[
+        {"label": "Employees",   "sql": "SELECT COUNT(*) FROM EMPLOYEES",   "icon": "fa-users",     "color": "#1E88E5"},
+        {"label": "Departments", "sql": "SELECT COUNT(*) FROM DEPARTMENTS", "icon": "fa-building",  "color": "#00995D"},
+        {"label": "Avg Salary",  "sql": "SELECT ROUND(AVG(SALARY)) FROM EMPLOYEES", "icon": "fa-dollar", "color": "#FF9800"},
+        {"label": "Managers",    "sql": "SELECT COUNT(DISTINCT MANAGER_ID) FROM EMPLOYEES", "icon": "fa-user-tie", "color": "#8E24AA"},
+    ],
+    sequence=10,
+)
+```
+
+---
+
+## Specialized Charts
+
+### `apex_add_gauge` — Dial/Gauge Chart
+
+Displays a single numeric value on a circular dial with configurable min, max, and threshold bands.
+
+```python
+apex_add_gauge(
+    page_id=1,
+    region_name="Average Score",
+    sql_query="SELECT ROUND(AVG(NR_PCT_TOTAL)) AS VALUE FROM AVALIACOES",
+    min_value=0,
+    max_value=100,
+    thresholds=[
+        {"value": 50, "color": "#E53935"},   # red up to 50
+        {"value": 75, "color": "#FB8C00"},   # orange up to 75
+        {"value": 100,"color": "#00995D"},   # green up to 100
+    ],
+    sequence=30,
+)
+```
+
+SQL must return a single numeric row aliased as `VALUE`.
+
+---
+
+### `apex_add_funnel` — Funnel Chart
+
+Visualizes a conversion funnel or pipeline stages. Data is ordered by sequence — widest at the top, narrowest at the bottom.
+
+```python
+apex_add_funnel(
+    page_id=1,
+    region_name="Recruitment Pipeline",
+    sql_query="""
+        SELECT stage AS LABEL, candidate_count AS VALUE
+          FROM recruitment_stages
+         ORDER BY stage_sequence
+    """,
+    sequence=40,
+)
+```
+
+SQL must alias category labels as `LABEL` and numeric values as `VALUE`.
+
+---
+
+### `apex_add_sparkline` — Sparkline with Trend
+
+A compact inline chart showing a value and a trend line for quick at-a-glance insight. Rendered as HTML/CSS (no JET dependency).
+
+```python
+apex_add_sparkline(
+    page_id=1,
+    region_name="Monthly Hires",
+    main_sql="SELECT COUNT(*) FROM EMPLOYEES WHERE TRUNC(HIRE_DATE,'MM') = TRUNC(SYSDATE,'MM')",
+    trend_sql="""
+        SELECT COUNT(*) AS VALUE
+          FROM EMPLOYEES
+         WHERE HIRE_DATE >= ADD_MONTHS(SYSDATE,-6)
+         GROUP BY TRUNC(HIRE_DATE,'MM')
+         ORDER BY 1
+    """,
+    label="New Hires This Month",
+    icon="fa-users",
+    color="green",
+    sequence=15,
+)
+```
+
+The `trend_sql` returns up to 7 rows with a `VALUE` column; these values are normalized to a mini bar sparkline inside the card.
+
+---
+
+### `apex_add_calendar` — Calendar Region
+
+Displays events or records on a monthly calendar view, using two columns for the date and title.
+
+```python
+apex_add_calendar(
+    page_id=71,
+    region_name="Hire Date Calendar",
+    sql_query="""
+        SELECT hire_date       AS date_col,
+               first_name || ' ' || last_name AS title_col
+          FROM employees
+         ORDER BY hire_date
+    """,
+    date_col="DATE_COL",
+    title_col="TITLE_COL",
+    sequence=10,
+)
+```
+
+---
+
+## Advanced Chart Types
+
+apex-mcp's `chart_tools.py` module provides 10 additional chart types for advanced analytics scenarios.
+
+### SQL Alias Requirements by Chart Type
+
+<Warning>
+  Each advanced chart type requires specific SQL column aliases. Using incorrect aliases will result in a chart with no data.
+</Warning>
+
+| Tool | Required SQL Aliases |
+|------|---------------------|
+| `apex_add_stacked_chart` | `LABEL`, `VALUE` (one series per call) |
+| `apex_add_combo_chart` | Bar SQL: `LABEL`, `VALUE` · Line SQL: `LABEL`, `VALUE` |
+| `apex_add_pareto_chart` | `LABEL`, `VALUE` (cumulative % computed automatically) |
+| `apex_add_scatter_plot` | `LABEL`, `X_VALUE`, `Y_VALUE` |
+| `apex_add_range_chart` | `LABEL`, `LOW_VALUE`, `HIGH_VALUE` |
+| `apex_add_area_chart` | `LABEL`, `VALUE` (stacked area) |
+| `apex_add_bubble_chart` | `LABEL`, `X_VALUE`, `Y_VALUE`, `Z_VALUE` (bubble size) |
+| `apex_add_gradient_donut` | `LABEL`, `VALUE` |
+| `apex_add_animated_counter` | Single numeric value (no alias required) |
+
+### Stacked Bar Chart
+
+Multiple series on the same bar chart, stacked on top of each other:
+
+```python
+apex_add_stacked_chart(
+    page_id=61,
+    region_name="Assessments by Status",
+    chart_type="bar",    # "bar" or "area"
+    series=[
+        {"name": "Completed",   "sql": "SELECT dept_id AS LABEL, COUNT(*) AS VALUE FROM assessments WHERE status='DONE'    GROUP BY dept_id ORDER BY 1"},
+        {"name": "In Progress", "sql": "SELECT dept_id AS LABEL, COUNT(*) AS VALUE FROM assessments WHERE status='ACTIVE'  GROUP BY dept_id ORDER BY 1"},
+        {"name": "Draft",       "sql": "SELECT dept_id AS LABEL, COUNT(*) AS VALUE FROM assessments WHERE status='DRAFT'   GROUP BY dept_id ORDER BY 1"},
+    ],
+    height=350,
+    sequence=20,
+)
+```
+
+### Combo Chart (Bar + Line)
+
+Dual-axis chart with bars on the primary Y axis and a line on the secondary Y axis:
+
+```python
+apex_add_combo_chart(
+    page_id=61,
+    region_name="Hires vs Avg Salary",
+    bar_sql="SELECT TO_CHAR(hire_date,'MM/YYYY') AS LABEL, COUNT(*) AS VALUE FROM employees GROUP BY TO_CHAR(hire_date,'MM/YYYY') ORDER BY 1",
+    line_sql="SELECT TO_CHAR(hire_date,'MM/YYYY') AS LABEL, ROUND(AVG(salary),0) AS VALUE FROM employees GROUP BY TO_CHAR(hire_date,'MM/YYYY') ORDER BY 1",
+    bar_series_name="New Hires",
+    line_series_name="Avg Salary",
+    height=320,
+    sequence=30,
+)
+```
+
+### Pareto Chart
+
+Bar chart with a cumulative percentage line — highlights which categories account for the most impact:
+
+```python
+apex_add_pareto_chart(
+    page_id=61,
+    region_name="Salary by Job Role",
+    sql_query="SELECT job_title AS LABEL, ROUND(AVG(salary)) AS VALUE FROM employees e JOIN jobs j ON j.job_id = e.job_id GROUP BY job_title ORDER BY 2 DESC",
+    sequence=40,
+)
+```
+
+### Scatter Plot
+
+Plots X vs. Y coordinates to reveal correlations:
+
+```python
+apex_add_scatter_plot(
+    page_id=61,
+    region_name="Experience vs Salary",
+    sql_query="""
+        SELECT first_name || ' ' || last_name   AS LABEL,
+               MONTHS_BETWEEN(SYSDATE,hire_date) AS X_VALUE,
+               salary                            AS Y_VALUE
+          FROM employees
+    """,
+    x_axis_title="Months Employed",
+    y_axis_title="Salary",
+    sequence=50,
+)
+```
+
+### Range Chart
+
+Shows min/max bands over time — useful for score ranges, salary bands, or confidence intervals:
+
+```python
+apex_add_range_chart(
+    page_id=61,
+    region_name="Salary Range by Department",
+    sql_query="""
+        SELECT department_name          AS LABEL,
+               MIN(salary)              AS LOW_VALUE,
+               MAX(salary)              AS HIGH_VALUE
+          FROM employees e
+          JOIN departments d ON d.department_id = e.department_id
+         GROUP BY department_name
+         ORDER BY AVG(salary) DESC
+    """,
+    sequence=60,
+)
+```
+
+### Bubble Chart
+
+Three-dimensional: X and Y position, bubble size as Z:
+
+```python
+apex_add_bubble_chart(
+    page_id=61,
+    region_name="Dept: Headcount vs Avg Salary vs Budget",
+    sql_query="""
+        SELECT d.department_name    AS LABEL,
+               COUNT(e.employee_id) AS X_VALUE,
+               ROUND(AVG(e.salary)) AS Y_VALUE,
+               d.budget             AS Z_VALUE
+          FROM departments d
+          JOIN employees e ON e.department_id = d.department_id
+         GROUP BY d.department_name, d.budget
+    """,
+    x_axis_title="Headcount",
+    y_axis_title="Avg Salary",
+    sequence=70,
+)
+```
+
+---
+
+## Chart Drilldown — `apex_add_chart_drilldown`
+
+Wire up click behavior on a chart series: clicking a bar or slice sets a hidden page item and refreshes an Interactive Report, turning the chart into a filter control.
+
+```python
+apex_add_chart_drilldown(
+    page_id=1,
+    chart_region_name="Employees by Department",
+    hidden_item_name="P1_SELECTED_DEPT",
+    ir_region_name="Employee Details",
+)
+```
+
+When a user clicks a chart bar, `P1_SELECTED_DEPT` is set to the clicked category label and the IR region is refreshed. The IR SQL should reference the item:
+
+```sql
+SELECT employee_id, first_name, last_name, salary
+  FROM employees e
+  JOIN departments d ON d.department_id = e.department_id
+ WHERE :P1_SELECTED_DEPT IS NULL
+    OR d.department_name = :P1_SELECTED_DEPT
+```
+
+<Note>
+  `apex_add_chart_drilldown` creates a Dynamic Action on the chart's `oraclejetEvent` event. The IR region must already exist on the same page.
+</Note>

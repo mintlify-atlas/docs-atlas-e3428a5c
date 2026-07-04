@@ -1,0 +1,123 @@
+---
+title: "Connect apex-mcp to Cursor IDE"
+sidebarTitle: "Cursor"
+description: "Add apex-mcp to Cursor IDE's MCP configuration using .cursor/mcp.json with stdio transport to access 116 Oracle APEX tools in the AI panel."
+---
+
+Cursor IDE includes native MCP support, meaning apex-mcp's 116 Oracle APEX tools are available directly inside the Chat panel alongside any model you have configured — Claude, GPT-4o, or others. Once connected, you can create applications, generate CRUD pages, add JET charts, and inspect your schema without leaving the editor.
+
+<Warning>
+  MCP support in Cursor requires **Cursor 0.43 or later**. Update via `Cursor → Check for Updates` before proceeding.
+</Warning>
+
+<Steps>
+  <Step title="Install apex-mcp">
+    Clone the repository and install it as an editable package:
+
+    ```bash
+    git clone https://github.com/your-org/apex-mcp
+    cd apex-mcp
+    pip install -e .
+    ```
+
+    Confirm the installation:
+
+    ```bash
+    python -m apex_mcp --help
+    ```
+  </Step>
+
+  <Step title="Create .cursor/mcp.json">
+    Create (or edit) the file `.cursor/mcp.json` at the root of your project. Cursor automatically reads this file for project-scoped MCP servers.
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "cwd": "${workspaceFolder}",
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
+    ```
+
+    Replace every `YOUR_*` placeholder with your actual Oracle and APEX credentials. Set `cwd` to the absolute path of the apex-mcp directory, or use `${workspaceFolder}` if you opened apex-mcp itself as the workspace.
+
+    <Note>
+      **Project vs. global config.** The `.cursor/mcp.json` file applies only to the current project. For a global config that applies across all projects, use `~/.cursor/mcp.json` with the same format and an absolute `cwd` path.
+    </Note>
+
+    Alternatively, you can add the server through the Cursor UI: go to **Cursor Settings → MCP → Add new global MCP server** and paste the `apex-mcp` block.
+  </Step>
+
+  <Step title="Restart Cursor">
+    Fully close and reopen Cursor so it picks up the new MCP configuration. Cursor starts the `apex-mcp` process in the background when the project loads.
+  </Step>
+
+  <Step title="Verify tools are available in the AI panel">
+    Open the Chat panel with **⌘L** (macOS) or **Ctrl+L** (Windows/Linux) and switch to **Agent** mode. You can verify the MCP server is connected by asking:
+
+    ```
+    List all available APEX tools
+    ```
+
+    Cursor will display the tools it found from apex-mcp. You can also inspect MCP server status and logs via **View → Output → MCP**.
+
+    <Note>
+      If the server shows `error` status in the MCP output, verify that `python` resolves correctly in your shell. If you use a virtual environment, replace `"command": "python"` with the full path to the venv interpreter, e.g. `"/home/user/apex-mcp/.venv/bin/python"`.
+    </Note>
+  </Step>
+
+  <Step title="Start building">
+    With Agent mode selected in the Chat panel, apex-mcp tools are automatically routed by the model. Start with a connection check:
+
+    ```
+    Connect to Oracle and show me the current APEX applications in the workspace.
+    ```
+
+    Then build incrementally:
+
+    ```
+    Add a CRUD page for the PRODUCTS table to app 200.
+    ```
+
+    ```
+    Generate a dashboard page with a JET bar chart showing sales by region from the ORDERS table.
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Choosing the Right Model
+
+apex-mcp works with any model available in Cursor — the tools are model-agnostic. However, complex multi-step APEX builds involve many sequential tool calls, so models with larger context windows handle them better.
+
+| Model | Suited for |
+|---|---|
+| Claude 3.5 Sonnet / 3.7 Sonnet | Full app generation, multi-step builds, complex schema inspection |
+| GPT-4o | General APEX tasks, CRUD generation, page updates |
+| Smaller / faster models | Single-tool queries, quick lookups, status checks |
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| Server shows `error` in MCP output | Check **View → Output → MCP** for the exact error message |
+| `python: command not found` | Use the full interpreter path: `"command": "/usr/bin/python3"` or your venv path |
+| Tools appear but fail with Oracle errors | Verify all `env` values — wallet path must be absolute and contain `cwallet.sso` |
+| Works with Claude model, not GPT | Some models handle large tool schemas differently; try rephrasing the request more directly |
+| Config not picked up after editing | Restart Cursor fully; changes to `.cursor/mcp.json` are not hot-reloaded |

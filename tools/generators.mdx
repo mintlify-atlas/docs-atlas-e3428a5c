@@ -1,0 +1,638 @@
+---
+title: "High-Level App Generators Reference"
+sidebarTitle: "Generators"
+description: "Reference for apex-mcp high-level generators: CRUD pages, dashboards, login, reports, wizards, modal forms, schema-to-app generation, and REST endpoints."
+---
+
+High-level generators compose multiple tool calls into a single operation — the fastest way to build Oracle APEX 24.2 applications. A single generator call can introspect your database schema, create multiple pages, wire up navigation, generate LOVs for foreign-key columns, and connect DML processes automatically. Use these tools first; reach for lower-level page and region tools only when you need to customize individual components.
+
+---
+
+## Full Application Generators
+
+### `apex_generate_crud`
+
+Generate a complete Create/Read/Update/Delete module for a database table. This is the most powerful single-table generator. It introspects the table structure, infers item types from column naming conventions and data types, auto-creates LOVs for FK columns, and links the list and form pages together.
+
+**What it creates:**
+- List page with an Interactive Report showing all table rows
+- Edit-link column in the IR pointing to the form page
+- IR worksheet with default sort on primary key
+- "New" button in the IR search bar
+- Form page with items for every non-audit column (types inferred from Oracle metadata)
+- Hidden PK item(s), select lists for FK columns with auto-generated LOVs
+- CANCEL, DELETE (conditional on PK not null), and SAVE buttons
+- `NATIVE_FORM_DML` process for INSERT / UPDATE / DELETE
+- Post-submit redirect back to the list page
+
+<ParamField path="table_name" type="string" required>
+  Database table name (case-insensitive). Validated against `user_tab_columns` before any DDL is executed.
+</ParamField>
+
+<ParamField path="list_page_id" type="integer" required>
+  Page ID for the Interactive Report list page (e.g., `10`).
+</ParamField>
+
+<ParamField path="form_page_id" type="integer" required>
+  Page ID for the edit form page (e.g., `11`).
+</ParamField>
+
+<ParamField path="list_page_name" type="string">
+  Display name for the list page. Defaults to the humanized table name (e.g., `"EMPLOYEES"` → `"Employees"`).
+</ParamField>
+
+<ParamField path="form_page_name" type="string">
+  Display name for the form page. Defaults to `"Edit {list_page_name}"`.
+</ParamField>
+
+<ParamField path="include_search" type="boolean" default="true">
+  Add a real-time search bar to the IR.
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Authorization scheme name to apply to both pages. Leave empty for public pages.
+</ParamField>
+
+<ParamField path="audit_columns" type="array">
+  Custom list of column names to exclude from the form (e.g., `["CREATED_ON","UPDATED_ON"]`). Defaults to a built-in set covering common English and Portuguese audit column patterns.
+</ParamField>
+
+<ParamField path="editable" type="boolean" default="true">
+  When `false`, form items render as display-only and Save/Delete buttons are omitted.
+</ParamField>
+
+<ParamField path="items_per_page" type="integer" default="15">
+  Rows per page in the IR default report.
+</ParamField>
+
+<ParamField path="button_labels" type="object">
+  Override default button labels. Supported keys: `new`, `save`, `cancel`, `delete`, `confirm_delete`.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_crud(
+    table_name="EMPLOYEES",
+    list_page_id=10,
+    form_page_id=11,
+    button_labels={"new": "Add Employee", "delete": "Remove"},
+    items_per_page=20,
+)
+```
+
+---
+
+### `apex_generate_from_schema`
+
+Generate a complete application from a list of database tables. This is the highest-level generator — pass your table list and receive a working multi-page app with navigation in a single call.
+
+**What it creates:**
+- A CRUD module (list + form pages) for every table in `tables`
+- A dashboard page (page 1) with one KPI metric card per table showing its row count
+- Navigation menu entries for all generated list pages and the dashboard
+
+<ParamField path="tables" type="array" required>
+  Ordered list of table names, e.g. `["EMPLOYEES", "DEPARTMENTS", "PROJECTS"]`. Pages are allocated in pairs: `start_page_id`/`start_page_id+1`, `start_page_id+2`/`start_page_id+3`, etc.
+</ParamField>
+
+<ParamField path="start_page_id" type="integer" default="10">
+  First page ID for the first CRUD list page.
+</ParamField>
+
+<ParamField path="include_dashboard" type="boolean" default="true">
+  Generate a dashboard page (page 1) with record-count KPI cards.
+</ParamField>
+
+<ParamField path="nav_icon_map" type="object">
+  Map of `TABLE_NAME` → Font Awesome icon class for navigation entries, e.g. `{"EMPLOYEES": "fa-users"}`. Unmapped tables default to `fa-table`.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_from_schema(
+    tables=["EMPLOYEES", "DEPARTMENTS", "PROJECTS"],
+    start_page_id=10,
+    include_dashboard=True,
+    nav_icon_map={
+        "EMPLOYEES": "fa-users",
+        "DEPARTMENTS": "fa-building",
+        "PROJECTS": "fa-folder",
+    },
+)
+```
+
+---
+
+### `apex_generate_dashboard`
+
+Generate a dashboard page with KPI cards and an Interactive Report.
+
+**What it creates:**
+- A KPI cards region using Universal Theme `t-Cards` grid layout (rendered via `NATIVE_PLSQL`)
+- An Interactive Report region below the cards
+
+<ParamField path="page_id" type="integer" required>
+  Page ID for the dashboard (typically `1`).
+</ParamField>
+
+<ParamField path="page_name" type="string" default="Dashboard">
+  Display name for the dashboard page.
+</ParamField>
+
+<ParamField path="kpi_queries" type="array">
+  List of KPI card definitions. Each object:
+  ```json
+  {
+    "title": "Total Users",
+    "sql": "SELECT COUNT(*) FROM users",
+    "icon": "fa-users",
+    "color": "u-color-1"
+  }
+  ```
+  If omitted, four sample KPI cards are generated automatically.
+</ParamField>
+
+<ParamField path="ir_sql" type="string">
+  SQL for the bottom Interactive Report. Defaults to `SELECT table_name, num_rows FROM user_tables`.
+</ParamField>
+
+<ParamField path="ir_title" type="string" default="Recent Records">
+  Title for the IR region.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_dashboard(
+    page_id=1,
+    page_name="Operations Dashboard",
+    kpi_queries=[
+        {"title": "Open Orders",  "sql": "SELECT COUNT(*) FROM ORDERS WHERE STATUS='OPEN'",  "icon": "fa-shopping-cart", "color": "u-color-1"},
+        {"title": "Active Users", "sql": "SELECT COUNT(*) FROM USERS WHERE FL_ATIVO='S'",    "icon": "fa-users",         "color": "u-color-2"},
+        {"title": "Revenue",      "sql": "SELECT TO_CHAR(SUM(AMOUNT),'FM$999,990') FROM ORDERS", "icon": "fa-dollar",   "color": "u-color-3"},
+    ],
+    ir_sql="SELECT ORDER_ID, CUSTOMER, AMOUNT, STATUS FROM ORDERS ORDER BY ORDER_DATE DESC",
+)
+```
+
+---
+
+### `apex_generate_analytics_page`
+
+Generate a complete analytics page combining metric cards and JET charts in a single call.
+
+**What it creates:**
+- Creates the page if it does not yet exist in the session
+- A `apex_add_metric_cards` region at the top (if `metrics` provided)
+- One `apex_add_jet_chart` region per entry in `charts`
+
+<ParamField path="page_id" type="integer" required>
+  Target page ID.
+</ParamField>
+
+<ParamField path="page_name" type="string" default="Analytics">
+  Display name (used only when the page is created fresh).
+</ParamField>
+
+<ParamField path="metrics" type="array">
+  List of metric card dicts (same format as `apex_add_metric_cards`). See the [Metric Cards](/tools/visual-charts#apex_add_metric_cards) reference.
+</ParamField>
+
+<ParamField path="charts" type="array">
+  List of chart dicts. Each supports the same arguments as `apex_add_jet_chart`:
+  `region_name`, `chart_type`, `sql_query`, `label_column`, `value_column`, `series_name`, `height`, `y_axis_title`, `x_axis_title`, `extra_series`.
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Optional authorization scheme applied when the page is created.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_analytics_page(
+    page_id=5,
+    page_name="Sales Analytics",
+    metrics=[
+        {"label": "Total Orders", "sql": "SELECT COUNT(*) FROM ORDERS", "icon": "fa-shopping-cart", "color": "blue"},
+        {"label": "Avg Value",    "sql": "SELECT ROUND(AVG(AMOUNT),2) FROM ORDERS", "icon": "fa-dollar", "color": "green"},
+    ],
+    charts=[
+        {"region_name": "Orders by Status", "chart_type": "pie",
+         "sql_query": "SELECT STATUS LABEL, COUNT(*) VALUE FROM ORDERS GROUP BY STATUS"},
+        {"region_name": "Monthly Revenue",  "chart_type": "bar",
+         "sql_query": "SELECT TO_CHAR(ORDER_DATE,'MM/YYYY') LABEL, SUM(AMOUNT) VALUE FROM ORDERS GROUP BY TO_CHAR(ORDER_DATE,'MM/YYYY') ORDER BY 1"},
+    ],
+)
+```
+
+---
+
+## Page-Level Generators
+
+### `apex_generate_login`
+
+Generate a standard APEX authentication login page.
+
+**What it creates:**
+- Login page using the APEX login page template (centered, no navigation)
+- `P{page_id}_USERNAME` text item with `autocomplete="username"`
+- `P{page_id}_PASSWORD` password item with `autocomplete="current-password"`
+- Hot "Sign In" button
+- `NATIVE_PLSQL` authentication process (defaults to `apex_authentication.login()`)
+
+<ParamField path="page_id" type="integer" default="101">
+  Page ID. Must match the login URL configured in `apex_create_app()`.
+</ParamField>
+
+<ParamField path="page_name" type="string" default="Login">
+  Page display name.
+</ParamField>
+
+<ParamField path="app_name" type="string">
+  Application name displayed above the login form. Defaults to `session.app_name`.
+</ParamField>
+
+<ParamField path="username_label" type="string" default="Username">
+  Label for the username field.
+</ParamField>
+
+<ParamField path="password_label" type="string" default="Password">
+  Label for the password field.
+</ParamField>
+
+<ParamField path="login_button_label" type="string" default="Sign In">
+  Label on the submit button.
+</ParamField>
+
+<ParamField path="auth_process_plsql" type="string">
+  Custom PL/SQL block for authentication. If omitted, uses `apex_authentication.login(p_username=>:P101_USERNAME, p_password=>:P101_PASSWORD)`.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_login(
+    page_id=101,
+    app_name="HR Portal",
+    username_label="Employee ID",
+    login_button_label="Sign In",
+)
+```
+
+---
+
+### `apex_generate_report_page`
+
+Generate a report page with an Interactive Report plus optional filter items at the top.
+
+**What it creates:**
+- The page (skipped if it already exists)
+- A "Filtros" filter region with the specified filter items and a Search button
+- An Interactive Report region with the supplied SQL
+- IR worksheet with optional CSV/XLSX/PDF export
+
+<ParamField path="page_id" type="integer" required>
+  Target page ID.
+</ParamField>
+
+<ParamField path="page_name" type="string" required>
+  Display name for the page.
+</ParamField>
+
+<ParamField path="sql_query" type="string" required>
+  SQL for the Interactive Report. Use bind variables matching `filter_items` names, e.g. `:P5_STATUS`.
+</ParamField>
+
+<ParamField path="filter_items" type="array">
+  List of filter field definitions. Each object:
+  ```json
+  {
+    "name": "STATUS",
+    "label": "Status",
+    "type": "select",
+    "lov": "SELECT DISTINCT DS_STATUS d, DS_STATUS r FROM MY_TABLE ORDER BY 1"
+  }
+  ```
+  Supported `type` values: `text`, `select`, `date`, `number`. Item names are auto-prefixed with `P{page_id}_`.
+</ParamField>
+
+<ParamField path="title" type="string">
+  Title for the IR region. Defaults to `page_name`.
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Authorization scheme name.
+</ParamField>
+
+<ParamField path="include_export" type="boolean" default="true">
+  Show CSV / XLSX / PDF export buttons in the IR.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_report_page(
+    page_id=20,
+    page_name="Order Report",
+    sql_query="""
+        SELECT ORDER_ID, CUSTOMER, AMOUNT, STATUS, ORDER_DATE
+          FROM ORDERS
+         WHERE (:P20_STATUS IS NULL OR STATUS = :P20_STATUS)
+           AND (:P20_FROM   IS NULL OR ORDER_DATE >= TO_DATE(:P20_FROM,'YYYY-MM-DD'))
+    """,
+    filter_items=[
+        {"name": "STATUS", "label": "Status", "type": "select",
+         "lov": "SELECT DISTINCT STATUS d, STATUS r FROM ORDERS ORDER BY 1"},
+        {"name": "FROM",   "label": "From Date", "type": "date"},
+    ],
+)
+```
+
+---
+
+### `apex_generate_wizard`
+
+Generate a multi-step wizard (2–6 steps) with a progress indicator, Previous/Next navigation, and page branching.
+
+**What it creates per step:**
+- An APEX page (`start_page_id + step_index`)
+- A `NATIVE_PLSQL` progress bar region showing step labels and a colored progress bar
+- A form region with the step's items
+- Previous button (all steps except first), Next/Finish button
+- Page branch redirecting to the next step on NEXT submit
+
+<ParamField path="start_page_id" type="integer" required>
+  Page ID for step 1. Subsequent steps use `start_page_id+1`, `+2`, etc.
+</ParamField>
+
+<ParamField path="steps" type="array" required>
+  List of step definition objects. Each object:
+  ```json
+  {
+    "title": "Step 1: Basic Info",
+    "items": [
+      {"name": "NOME",  "label": "Full Name", "type": "text",   "required": true},
+      {"name": "EMAIL", "label": "Email",     "type": "text"}
+    ]
+  }
+  ```
+  Supported item `type` values: `text`, `number`, `date`, `select`, `textarea`, `hidden`.
+</ParamField>
+
+<ParamField path="wizard_title" type="string" default="Wizard">
+  Header label used in log output.
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Authorization scheme applied to all step pages.
+</ParamField>
+
+<ParamField path="finish_redirect_page" type="integer">
+  Page to redirect to after the last step is submitted. Defaults to page `1`.
+</ParamField>
+
+**Example:**
+
+```python
+apex_generate_wizard(
+    start_page_id=30,
+    wizard_title="New Employee Onboarding",
+    finish_redirect_page=10,
+    steps=[
+        {
+            "title": "Personal Details",
+            "items": [
+                {"name": "FIRST_NAME", "label": "First Name", "type": "text", "required": True},
+                {"name": "LAST_NAME",  "label": "Last Name",  "type": "text", "required": True},
+                {"name": "HIRE_DATE",  "label": "Hire Date",  "type": "date"},
+            ],
+        },
+        {
+            "title": "Role & Department",
+            "items": [
+                {"name": "DEPT_ID",  "label": "Department", "type": "select",
+                 "lov": "SELECT DEPT_NAME d, DEPT_ID r FROM DEPARTMENTS ORDER BY 1"},
+                {"name": "JOB_TITLE","label": "Job Title",  "type": "text"},
+            ],
+        },
+        {
+            "title": "Confirmation",
+            "items": [],
+        },
+    ],
+)
+```
+
+---
+
+### `apex_generate_modal_form`
+
+Create an inline modal popup (dialog) form region on an existing page — no separate dialog page needed.
+
+**What it creates:**
+- A `NATIVE_PLSQL` region placed in `AFTER_FOOTER` that renders a `t-DialogRegion` container
+- A hidden PK item inside the modal region
+- An after-submit `NATIVE_PLSQL` process (request = `SAVE_MODAL`) that MERGEs into the target table
+
+<Note>
+  To open the modal from a button, set the button's action to `DEFINED_BY_DA` and add a Dynamic Action that executes `apex.region('<static_id>').show();` where `static_id` is the `region_static_id` value returned by this tool.
+</Note>
+
+<ParamField path="page_id" type="integer" required>
+  Page where the modal lives (must already be in the session).
+</ParamField>
+
+<ParamField path="region_name" type="string" required>
+  Display name of the modal region.
+</ParamField>
+
+<ParamField path="table_name" type="string" required>
+  Target database table for the Save process.
+</ParamField>
+
+<ParamField path="pk_item_name" type="string" required>
+  Primary key item name suffix. Auto-prefixed with `P{page_id}_` if needed.
+</ParamField>
+
+<ParamField path="title" type="string">
+  Modal title shown in the dialog header. Defaults to `region_name`.
+</ParamField>
+
+<ParamField path="sequence" type="integer" default="10">
+  Display sequence for the region.
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Optional authorization scheme name.
+</ParamField>
+
+**Example:**
+
+```python
+result = apex_generate_modal_form(
+    page_id=10,
+    region_name="Quick Edit Employee",
+    table_name="EMPLOYEES",
+    pk_item_name="EMP_ID",
+    title="Edit Employee",
+)
+# result["region_static_id"] => "modal_quick_edit_employee"
+# Open with: apex.region('modal_quick_edit_employee').show();
+```
+
+---
+
+## Special Component Generators
+
+### `apex_add_interactive_grid`
+
+Add an editable Interactive Grid (IG) region — spreadsheet-style inline editing for multiple rows simultaneously.
+
+<ParamField path="page_id" type="integer" required>Page must exist in session.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="table_name" type="string" required>Database table for DML operations.</ParamField>
+<ParamField path="sql_query" type="string">SELECT SQL for the IG. Defaults to `SELECT * FROM {table_name}`.</ParamField>
+<ParamField path="editable" type="boolean" default="true">Allow inline cell editing with INSERT/UPDATE/DELETE.</ParamField>
+<ParamField path="add_row" type="boolean" default="true">Show "Add Row" button in the toolbar.</ParamField>
+<ParamField path="sequence" type="integer" default="10">Region display order.</ParamField>
+
+---
+
+### `apex_add_master_detail`
+
+Place a master Interactive Report and a detail Interactive Report on the same page, linked by a foreign key column.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="master_region_name" type="string" required>Name for the master IR region.</ParamField>
+<ParamField path="master_sql" type="string" required>SQL for the master IR.</ParamField>
+<ParamField path="detail_region_name" type="string" required>Name for the detail IR region.</ParamField>
+<ParamField path="detail_sql" type="string" required>SQL for the detail IR. Must reference a bind variable for the FK value.</ParamField>
+<ParamField path="fk_item_name" type="string" required>Page item name used to pass the selected master PK to the detail query.</ParamField>
+
+---
+
+### `apex_add_faceted_search`
+
+Add a faceted search panel (left-side filter checkboxes / ranges) linked to an Interactive Report.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Name for the IR region.</ParamField>
+<ParamField path="sql_query" type="string" required>SQL for the Interactive Report.</ParamField>
+<ParamField path="facets" type="array" required>
+  List of facet definitions. Each object:
+  ```json
+  {"column": "STATUS", "label": "Status", "type": "checkbox"}
+  ```
+  Supported `type` values: `checkbox`, `range`, `search`.
+</ParamField>
+
+---
+
+### `apex_add_search_bar`
+
+Add a real-time search text field that filters an Interactive Report on every keystroke via a Dynamic Action.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Name for the search bar region.</ParamField>
+<ParamField path="target_region_name" type="string" required>Name of the IR region to filter.</ParamField>
+<ParamField path="search_item_name" type="string" default="BUSCA">Item name suffix (auto-prefixed with `P{page_id}_`).</ParamField>
+<ParamField path="search_label" type="string" default="Search">Label for the search field.</ParamField>
+<ParamField path="placeholder" type="string" default="Type to search...">Input placeholder text.</ParamField>
+
+**Example:**
+
+```python
+apex_add_search_bar(
+    page_id=10,
+    region_name="Search Bar",
+    target_region_name="Employee List",
+    search_label="Filter Employees",
+)
+```
+
+---
+
+### `apex_add_timeline`
+
+Add a vertical timeline region rendered using Universal Theme `t-Timeline` CSS classes.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Region display name.</ParamField>
+<ParamField path="sql_query" type="string" required>
+  SQL returning at least `date_col`, `title_col`, and `body_col`. Example:
+  ```sql
+  SELECT TO_CHAR(DT_LOG,'DD/MM/YYYY') AS DT,
+         DS_ACTION AS TITULO,
+         DS_DETAILS AS CORPO
+    FROM AUDIT_LOG
+   WHERE USER_ID = :P10_USER_ID
+   ORDER BY DT_LOG DESC
+  ```
+</ParamField>
+<ParamField path="date_col" type="string" required>Column alias for the date/time label.</ParamField>
+<ParamField path="title_col" type="string" required>Column alias for the timeline item title.</ParamField>
+<ParamField path="body_col" type="string" required>Column alias for the timeline item body text.</ParamField>
+<ParamField path="icon_col" type="string">Column alias providing a Font Awesome icon class per row. Defaults to `fa-circle`.</ParamField>
+
+---
+
+### `apex_add_breadcrumb`
+
+Add a breadcrumb navigation region using Universal Theme `t-Breadcrumb` markup, rendered into the `BREADCRUMB_BAR` display point.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Internal region name.</ParamField>
+<ParamField path="entries" type="array" required>
+  Ordered list of breadcrumb items. Each object:
+  ```json
+  {"label": "Home",         "page_id": 1},
+  {"label": "Employees",    "page_id": 10},
+  {"label": "Edit Record",  "page_id": null}
+  ```
+  Pass `page_id: null` to render the entry as the active (non-linked) current page.
+</ParamField>
+
+---
+
+### `apex_add_file_upload`
+
+Add a `FILE_BROWSE` item plus an after-submit PL/SQL process that stores the uploaded file as a BLOB in a database table column.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Name of an existing region to place the file-browse item in.</ParamField>
+<ParamField path="item_name" type="string" required>Item name suffix (auto-prefixed with `P{page_id}_`).</ParamField>
+<ParamField path="label" type="string" required>Display label for the file-browse field.</ParamField>
+<ParamField path="table_name" type="string" required>Database table containing the BLOB column.</ParamField>
+<ParamField path="pk_item" type="string" required>Page item name for the primary key of the row to update.</ParamField>
+<ParamField path="blob_col" type="string" required>BLOB column name.</ParamField>
+<ParamField path="filename_col" type="string" required>VARCHAR2 column that stores the original filename.</ParamField>
+<ParamField path="mimetype_col" type="string" required>VARCHAR2 column that stores the MIME type.</ParamField>
+
+---
+
+### `apex_add_chart_drilldown`
+
+Wire a Dynamic Action that captures a JET Chart click and refreshes a detail IR with the clicked group label as a filter.
+
+<ParamField path="page_id" type="integer" required>Target page ID.</ParamField>
+<ParamField path="chart_region_name" type="string" required>Name of the existing JET Chart region to listen on.</ParamField>
+<ParamField path="target_item_name" type="string" required>Suffix for the hidden item that stores the clicked label (auto-prefixed with `P{page_id}_`). Must match a bind variable in the detail IR SQL.</ParamField>
+<ParamField path="filter_column" type="string" required>Chart series/group column whose label is captured (used in the DA name for clarity).</ParamField>
+<ParamField path="target_region_name" type="string" required>Name of the IR/IG region to refresh after the item is set.</ParamField>
+
+**Example:**
+
+```python
+# Chart SQL: SELECT STATUS LABEL, COUNT(*) VALUE FROM ORDERS GROUP BY STATUS
+apex_add_chart_drilldown(
+    page_id=5,
+    chart_region_name="Orders by Status",
+    target_item_name="FILTER_STATUS",
+    filter_column="STATUS",
+    target_region_name="Order Detail",
+)
+# Detail IR SQL must include: WHERE (:P5_FILTER_STATUS IS NULL OR STATUS = :P5_FILTER_STATUS)
+```

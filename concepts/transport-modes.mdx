@@ -1,0 +1,89 @@
+---
+title: "Transport Modes: stdio, HTTP, and SSE"
+sidebarTitle: "Transport Modes"
+description: "apex-mcp supports three MCP transport modes: stdio for local AI clients, streamable-HTTP for remote or multi-client setups, and SSE for legacy compatibility."
+---
+
+apex-mcp supports three MCP transport modes, selected via the `--transport` CLI flag or the `MCP_TRANSPORT` environment variable. Each mode targets a different deployment scenario: local AI clients that manage the server process directly, remote HTTP-based clients that connect to a running server, and legacy clients that require Server-Sent Events. If no transport is specified, apex-mcp defaults to `stdio`.
+
+## stdio (Default)
+
+The `stdio` transport launches apex-mcp as a subprocess and communicates over standard input/output. This is the most common mode for local development because AI clients like Claude Code and Cursor manage the server lifecycle automatically — no separate server process to start or stop.
+
+```bash
+python -m apex_mcp                     # default transport
+python -m apex_mcp --transport stdio   # explicit
+apex-mcp                               # if installed via pip
+```
+
+**Best for:** Claude Code, Claude Desktop, Cursor, VS Code / GitHub Copilot, Gemini CLI.
+
+## Streamable HTTP
+
+The `streamable-http` transport starts a persistent HTTP server that MCP clients connect to over the network. The server listens at `http://127.0.0.1:8000/mcp` by default.
+
+```bash
+apex-mcp --transport streamable-http --port 8000
+# Server available at: http://127.0.0.1:8000/mcp
+```
+
+This mode is required for clients that use HTTP-based MCP connections, such as the OpenAI Agents SDK:
+
+```python
+from agents.mcp import MCPServerStreamableHttp
+
+async with MCPServerStreamableHttp(url="http://127.0.0.1:8000/mcp") as apex:
+    # use apex as an mcp_server in an Agent
+    ...
+```
+
+**Best for:** OpenAI Agents SDK, GitHub Codespaces, remote or containerized setups, scenarios where multiple processes need to share one server.
+
+## SSE (Server-Sent Events)
+
+The `sse` transport starts an HTTP server using the Server-Sent Events protocol. The endpoint is at `http://127.0.0.1:9000/sse` by default.
+
+```bash
+apex-mcp --transport sse --port 9000
+# Server available at: http://127.0.0.1:9000/sse
+```
+
+**Best for:** MCP clients that explicitly require SSE transport rather than streamable HTTP.
+
+## CLI Flags Reference
+
+All HTTP transport behavior can be tuned with CLI flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--transport` | `stdio` | Transport mode: `stdio`, `streamable-http`, or `sse` |
+| `--host` | `127.0.0.1` | Host address to bind for HTTP transports |
+| `--port` | `8000` | Port to bind for HTTP transports |
+| `--path` | `/mcp` (http) or `/sse` | URL path for the MCP endpoint |
+
+## Environment Variable Equivalents
+
+Every CLI flag has a corresponding environment variable. CLI flags take precedence over environment variables when both are set:
+
+| Environment Variable | Equivalent CLI Flag | Default |
+|---|---|---|
+| `MCP_TRANSPORT` | `--transport` | `stdio` |
+| `MCP_HOST` | `--host` | `127.0.0.1` |
+| `MCP_PORT` | `--port` | `8000` |
+| `MCP_PATH` | `--path` | `/mcp` (http) or `/sse` |
+
+Environment variables are useful for containerized deployments where you want to configure transport without modifying the command line:
+
+```bash
+export MCP_TRANSPORT=streamable-http
+export MCP_PORT=8000
+apex-mcp
+```
+
+<Note>
+**No built-in authentication:** apex-mcp's HTTP transport has no authentication layer. The server binds to `127.0.0.1` by default, which prevents external access. If you need to expose apex-mcp over a network, place it behind a reverse proxy (nginx, Caddy, etc.) that handles TLS termination and authentication before forwarding requests to apex-mcp.
+</Note>
+
+<Warning>
+**Single-user constraint in HTTP/SSE modes:** When using `--transport streamable-http` or `--transport sse`, apex-mcp is a single-user server. The `ImportSession` singleton means only one active `apex_create_app()` → `apex_finalize_app()` sequence can run at a time per server process. Concurrent sessions from different clients will interfere with each other. For multi-user deployments, run separate apex-mcp instances on different ports.
+</Warning>

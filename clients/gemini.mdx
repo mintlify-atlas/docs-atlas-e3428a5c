@@ -1,0 +1,206 @@
+---
+title: "Connect apex-mcp to Google Gemini CLI"
+sidebarTitle: "Gemini"
+description: "Configure apex-mcp in the Google Gemini CLI using .gemini/settings.json with stdio transport to use 116 Oracle APEX tools from the command line."
+---
+
+The Google Gemini CLI reads MCP server configuration from `.gemini/settings.json` in your project root, making it straightforward to pair with apex-mcp for Oracle APEX development from the terminal. Once configured, you can prompt Gemini to create applications, generate CRUD pages, inspect schemas, and run SQL — all via the 116 tools that apex-mcp exposes over stdio. The same configuration structure also supports remote HTTP connections and the Google ADK for Python-based automation.
+
+<Steps>
+  <Step title="Install both Gemini CLI and apex-mcp">
+    Install the Gemini CLI globally via npm:
+
+    ```bash
+    npm install -g @google/gemini-cli
+    ```
+
+    Then clone and install apex-mcp:
+
+    ```bash
+    git clone https://github.com/your-org/apex-mcp
+    cd apex-mcp
+    pip install -e .
+    ```
+
+    Verify both are available:
+
+    ```bash
+    gemini --version
+    python -m apex_mcp --help
+    ```
+  </Step>
+
+  <Step title="Create .gemini/settings.json">
+    Create the file `.gemini/settings.json` at the root of your project. The Gemini CLI uses the `mcpServers` key with the same stdio format as Claude Code and Cursor:
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
+    ```
+
+    Replace every `YOUR_*` placeholder with your actual Oracle and APEX credentials. The `ORACLE_WALLET_DIR` path must be absolute and point to the directory that contains `cwallet.sso`.
+
+    For a **global** config that applies across all projects, place the same file at `~/.gemini/settings.json` and add an explicit `"cwd"` pointing to the apex-mcp directory:
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "cwd": "/absolute/path/to/apex-mcp",
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Start Gemini CLI and verify apex-mcp is loaded">
+    Launch the Gemini CLI from your project directory:
+
+    ```bash
+    gemini
+    ```
+
+    Inside the interactive session, list registered MCP servers:
+
+    ```
+    /mcp list
+    ```
+
+    You should see `apex-mcp` with **116 tools** listed. If the server is not found, verify that `python` is in your PATH and that the `apex_mcp` package is installed (`pip show apex-mcp`).
+  </Step>
+
+  <Step title="Run your first APEX prompt">
+    With apex-mcp connected, Gemini automatically routes tool calls to the correct server. Start with a connection check:
+
+    ```
+    Connect to the Oracle database and list all APEX applications in the workspace.
+    ```
+
+    Then try a more complete workflow:
+
+    ```
+    Create a new APEX app with ID 300, generate CRUD pages for the EMPLOYEES and DEPARTMENTS tables, add a dashboard with a JET bar chart showing headcount by department, then finalize the app.
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Remote server (HTTP mode)
+
+If apex-mcp is running on a remote machine or inside a container, use `httpUrl` instead of `command`/`args`:
+
+```json
+{
+  "mcpServers": {
+    "apex-mcp": {
+      "httpUrl": "http://your-server:8000/mcp"
+    }
+  }
+}
+```
+
+Start the remote server with:
+
+```bash
+apex-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+<Warning>
+  Binding to `0.0.0.0` exposes apex-mcp on all interfaces. For anything beyond a local network, place a reverse proxy with authentication (e.g., nginx + OAuth2 Proxy) in front of the server.
+</Warning>
+
+---
+
+## Google ADK (Python automation)
+
+For automated pipelines using the Google Agent Development Kit, use `MCPToolset` with `StdioServerParameters` to embed apex-mcp directly in your agent:
+
+```python
+import asyncio
+from google.adk.agents import Agent
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StdioServerParameters
+
+async def main():
+    toolset = MCPToolset(
+        connection_params=StdioServerParameters(
+            command="python",
+            args=["-m", "apex_mcp"],
+            env={
+                "ORACLE_DB_USER": "YOUR_SCHEMA",
+                "ORACLE_DB_PASS": "YOUR_PASSWORD",
+                "ORACLE_DSN": "YOUR_DSN",
+                "ORACLE_WALLET_DIR": "/path/to/wallet",
+                "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+                "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+                "APEX_SCHEMA": "YOUR_SCHEMA",
+                "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE",
+            }
+        )
+    )
+
+    agent = Agent(
+        model="gemini-2.0-flash",
+        name="apex_developer",
+        instruction="Build Oracle APEX applications using the available tools.",
+        tools=[toolset],
+    )
+
+    async with toolset:
+        result = await agent.run("Connect to Oracle and list all APEX apps.")
+        print(result)
+
+asyncio.run(main())
+```
+
+---
+
+## FastMCP shortcut
+
+If you have `fastmcp` installed, you can auto-register apex-mcp with the Gemini CLI in one command:
+
+```bash
+fastmcp install gemini-cli /path/to/apex-mcp/apex_mcp/server.py
+```
+
+This writes the correct entry to your Gemini CLI config automatically.
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `MCP server not found` | Verify `cwd` points to the directory containing the `apex_mcp/` package |
+| Tools not listed after `/mcp list` | Confirm `python` is in `$PATH`; run `python --version` to check |
+| `ModuleNotFoundError: apex_mcp` | Run `pip install -e .` from the apex-mcp directory |
+| HTTP connection refused | Start the server first: `apex-mcp --transport streamable-http` |
+| Oracle wallet errors | `ORACLE_WALLET_DIR` must be an absolute path containing `cwallet.sso` |

@@ -1,0 +1,165 @@
+---
+title: "Connect apex-mcp to VS Code and GitHub Copilot"
+sidebarTitle: "VS Code"
+description: "Add apex-mcp to VS Code's .vscode/mcp.json for use with GitHub Copilot. Supports both stdio transport for local use and HTTP transport for Codespaces."
+---
+
+VS Code added MCP support (GA, July 2025) through the GitHub Copilot extension. With apex-mcp configured, Copilot's **Agent mode** gains all 116 Oracle APEX tools — enabling you to generate pages, run schema inspections, and build complete applications directly from the editor chat panel. Two transport modes are available: `stdio` for local development and `http` for GitHub Codespaces or any remote development environment.
+
+<Warning>
+  **VS Code 1.93 or later** is required, along with the GitHub Copilot extension with Copilot Chat enabled. Enable Agent Mode under **Settings → Copilot → Agent Mode** before proceeding.
+</Warning>
+
+<Note>
+  VS Code uses a **different config format** from Claude, Cursor, and Gemini. The top-level key is `"servers"` (not `"mcpServers"`) and each entry requires a `"type"` field (`"stdio"` or `"http"`). Using the wrong format will cause VS Code to silently ignore the configuration.
+</Note>
+
+---
+
+## Stdio Mode (local development)
+
+Use this mode when apex-mcp and VS Code are running on the same machine.
+
+<Steps>
+  <Step title="Install apex-mcp">
+    Clone the repository and install it as an editable package:
+
+    ```bash
+    git clone https://github.com/your-org/apex-mcp
+    cd apex-mcp
+    pip install -e .
+    ```
+  </Step>
+
+  <Step title="Create .vscode/mcp.json">
+    Create the file `.vscode/mcp.json` at the root of your project (or edit it if it already exists). Note the VS Code-specific format: `"servers"` at the top level and `"type": "stdio"` on each entry.
+
+    ```json
+    {
+      "servers": {
+        "apex-mcp": {
+          "type": "stdio",
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        }
+      }
+    }
+    ```
+
+    Replace every `YOUR_*` placeholder with your actual Oracle and APEX credentials. The `ORACLE_WALLET_DIR` path must be absolute and point to the directory containing `cwallet.sso`.
+
+    Unlike Cursor and Claude Code, VS Code's stdio config does not require a `cwd` field — the working directory defaults to the workspace root. If your apex-mcp install is elsewhere, add `"cwd": "/absolute/path/to/apex-mcp"`.
+  </Step>
+
+  <Step title="Enable the MCP server">
+    Open VS Code in the apex-mcp directory. VS Code will detect the new `.vscode/mcp.json` and display a prompt: **"Enable MCP server 'apex-mcp'?"** — click **Enable**.
+
+    If the prompt does not appear, open the Command Palette (**⇧⌘P** / **Ctrl+Shift+P**) and run **MCP: List Servers** to check the server status.
+  </Step>
+
+  <Step title="Open Copilot Chat in Agent mode">
+    Open Copilot Chat with **Ctrl+Alt+I** (or via the Copilot icon in the sidebar) and switch to **Agent** mode from the mode selector at the top of the panel.
+
+    Start with a connection check:
+
+    ```
+    Connect to Oracle and show me all APEX applications in the workspace.
+    ```
+
+    You can also use the `@apex-mcp` mention to explicitly target the server:
+
+    ```
+    @apex-mcp List all tables in the Oracle schema and generate CRUD pages for EMPLOYEES
+    ```
+  </Step>
+</Steps>
+
+---
+
+## HTTP Mode (Codespaces and remote development)
+
+When VS Code is connected to a remote host, a dev container, or GitHub Codespaces, the stdio transport cannot cross the local/remote boundary. Use HTTP mode instead: start apex-mcp as an HTTP server inside the remote environment and point VS Code at its URL.
+
+<Steps>
+  <Step title="Start apex-mcp in HTTP mode inside the remote environment">
+    In the integrated terminal of your Codespace or remote host, export your Oracle credentials and start the server:
+
+    ```bash
+    export ORACLE_DB_USER=YOUR_SCHEMA
+    export ORACLE_DB_PASS=YOUR_PASSWORD
+    export ORACLE_DSN=YOUR_DSN
+    export ORACLE_WALLET_DIR=/path/to/wallet
+    export ORACLE_WALLET_PASSWORD=YOUR_WALLET_PW
+    export APEX_WORKSPACE_ID=YOUR_WORKSPACE_ID
+    export APEX_SCHEMA=YOUR_SCHEMA
+    export APEX_WORKSPACE_NAME=YOUR_WORKSPACE
+
+    apex-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+    ```
+
+    The server will be available at `http://localhost:8000/mcp` (VS Code port-forwards it automatically in Codespaces).
+
+    <Warning>
+      Binding to `0.0.0.0` exposes the server on all interfaces within the remote environment. For production or shared Codespaces, add a reverse proxy with authentication in front of apex-mcp.
+    </Warning>
+  </Step>
+
+  <Step title="Update .vscode/mcp.json to use HTTP transport">
+    Replace the stdio configuration with an HTTP entry. The `"type": "http"` format does not require command, args, or env — just the server URL:
+
+    ```json
+    {
+      "servers": {
+        "apex-mcp": {
+          "type": "http",
+          "url": "http://localhost:8000/mcp"
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Verify the connection">
+    Open the Command Palette and run **MCP: List Servers**. The `apex-mcp` entry should show as connected. Then open Copilot Chat in Agent mode and confirm:
+
+    ```
+    List all available APEX tools and connect to the Oracle database.
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Config Format Reference
+
+VS Code's MCP format differs from the other supported clients. Keep this table handy when adapting configs:
+
+| Client | Top-level key | `type` field |
+|---|---|---|
+| **VS Code** | `"servers"` | Required — `"stdio"` or `"http"` |
+| Claude Code | `"mcpServers"` | Not used |
+| Cursor | `"mcpServers"` | Not used |
+| Gemini CLI | `"mcpServers"` | Not used |
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| No tools shown in Agent mode | Check **View → Output → MCP** for error details |
+| `"servers" not recognized` | Confirm VS Code 1.93+ and that the Copilot extension is up to date |
+| `"type" is required` error | Add `"type": "stdio"` or `"type": "http"` to the server entry |
+| Tools visible but fail | Verify env vars — `ORACLE_WALLET_DIR` must be an absolute path to the wallet directory |
+| Works locally, fails in remote | Switch to HTTP transport mode (see above) |
+| Enable prompt never appeared | Run **MCP: List Servers** from the Command Palette to trigger server registration |

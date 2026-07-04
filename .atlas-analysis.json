@@ -1,0 +1,162 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "apex-mcp",
+  "projectDescription": "An MCP server that exposes 116 tools for building, inspecting, and modifying Oracle APEX 24.2 applications through AI assistants like Claude, GPT, Gemini, Cursor, and VS Code.",
+  "theme": "luma",
+  "primaryColor": "#dedede",
+  "lightColor": "#fbde58",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "AI Client Setup",
+            "pages": [
+              "clients/claude",
+              "clients/cursor",
+              "clients/vscode",
+              "clients/gemini",
+              "clients/gpt",
+              "clients/zai"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/transport-modes",
+              "concepts/app-lifecycle",
+              "concepts/batch-and-dryrun"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/build-first-app",
+              "guides/crud-generation",
+              "guides/dashboards-charts",
+              "guides/schema-introspection",
+              "guides/rest-endpoints"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tool Reference",
+        "groups": [
+          {
+            "group": "Connection & Setup",
+            "pages": [
+              "tools/connection",
+              "tools/setup"
+            ]
+          },
+          {
+            "group": "Apps & Pages",
+            "pages": [
+              "tools/apps",
+              "tools/pages"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "tools/components",
+              "tools/shared-components",
+              "tools/validations"
+            ]
+          },
+          {
+            "group": "Generators",
+            "pages": [
+              "tools/generators",
+              "tools/visual-charts",
+              "tools/ui-components"
+            ]
+          },
+          {
+            "group": "DevOps & Advanced",
+            "pages": [
+              "tools/devops",
+              "tools/javascript",
+              "tools/inspect"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "116 MCP tools across 17 categories for Oracle APEX 24.2 development",
+    "High-level generators for CRUD, dashboards, analytics pages, wizards, and REST endpoints",
+    "Supports Claude, GPT, Gemini, Cursor, VS Code, and any MCP-compatible AI client",
+    "Three transport modes: stdio, streamable-HTTP, and SSE",
+    "Connects to Oracle Autonomous Database via oracledb thin driver with mTLS wallet (no Instant Client)",
+    "Batch mode and dry-run mode for safe, efficient app creation",
+    "20 rich HTML UI components and 10 advanced chart types",
+    "MCP resources and workflow prompts for guided app building",
+    "Full schema introspection with FK relationship detection",
+    "App export, page diffing, Markdown doc generation, and ORDS REST endpoint generation"
+  ],
+  "publicApiSurface": [
+    "apex_connect()",
+    "apex_run_sql(sql)",
+    "apex_status()",
+    "apex_create_app(app_id, app_name, home_page)",
+    "apex_finalize_app()",
+    "apex_list_apps()",
+    "apex_delete_app(app_id)",
+    "apex_export_app(app_id)",
+    "apex_add_page(page_id, page_name, page_mode)",
+    "apex_list_pages()",
+    "apex_add_region(page_id, region_name, region_type)",
+    "apex_add_item(page_id, item_name, item_type)",
+    "apex_add_button(page_id, button_name)",
+    "apex_add_process(page_id, process_name, process_type)",
+    "apex_add_dynamic_action(page_id, event, action)",
+    "apex_add_lov(lov_name, lov_type, sql_query)",
+    "apex_add_auth_scheme(scheme_name)",
+    "apex_add_nav_item(label, app_id, page_id, icon)",
+    "apex_list_tables()",
+    "apex_describe_table(table_name)",
+    "apex_detect_relationships(tables)",
+    "apex_generate_crud(table_name, list_page_id, form_page_id)",
+    "apex_generate_dashboard(page_id)",
+    "apex_generate_login(page_id)",
+    "apex_generate_from_schema(tables, start_page_id)",
+    "apex_generate_analytics_page(page_id, metrics, charts)",
+    "apex_generate_report_page(page_id, sql_query)",
+    "apex_generate_wizard(start_page_id, steps)",
+    "apex_generate_modal_form(page_id, region_name, table_name)",
+    "apex_generate_rest_endpoints(table_name)",
+    "apex_add_jet_chart(page_id, chart_type, sql_query)",
+    "apex_add_metric_cards(page_id, metrics)",
+    "apex_add_interactive_grid(page_id, table_name)",
+    "apex_add_master_detail(page_id)",
+    "apex_add_faceted_search(page_id, facets)",
+    "apex_begin_batch()",
+    "apex_commit_batch(rollback_on_error)",
+    "apex_dry_run_preview(enabled)",
+    "apex_export_page(app_id, page_id)",
+    "apex_generate_docs(app_id)",
+    "apex_validate_app()",
+    "apex_health_check()",
+    "apex_get_app_details(app_id)",
+    "apex_get_page_details(app_id, page_id)",
+    "apex_diff_app(app_id)",
+    "apex_setup_guide()",
+    "apex_check_requirements()",
+    "apex_check_permissions()",
+    "apex_fix_permissions()"
+  ]
+}

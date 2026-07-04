@@ -1,0 +1,259 @@
+---
+title: "Setup and Diagnostics Tools Reference"
+sidebarTitle: "Setup & Diagnostics"
+description: "Reference for apex-mcp setup and diagnostic tools: setup guide, requirements check, permissions check and fix, health check, template refresh, and audit log."
+---
+
+The setup and diagnostics tools are your first stop when configuring a new apex-mcp installation, troubleshooting connection problems, or verifying that Oracle permissions are correctly granted. They do not create APEX components — instead, they inspect the environment, report problems with actionable remediation steps, and apply automated fixes where possible. Use them before starting development on a new APEX instance, or any time something unexpected happens.
+
+## Setup Tools
+
+### apex_setup_guide
+
+Show a complete setup guide for connecting apex-mcp to Oracle Autonomous Database. Call this first if you are setting up the server for a new project — it explains all prerequisites, required credentials, and configuration steps in one structured response.
+
+This tool takes no parameters.
+
+**Returns:** JSON guide covering:
+- Prerequisites (Oracle ADB, wallet download steps, APEX workspace creation)
+- All required environment variables with descriptions, examples, and the exact `.mcp.json` template
+- Minimum database permissions needed
+- Quick-start checklist (10 steps from install to first app)
+- Troubleshooting tips for the most common Oracle errors (`ORA-28759`, `ORA-01017`, `TNS-03505`, etc.)
+
+**Example:**
+
+```python
+# First thing to call in a brand-new project
+apex_setup_guide()
+```
+
+<Note>
+  The guide includes a ready-to-paste `.mcp.json` template with all required environment variable keys. Copy it to your project root and fill in your specific values.
+</Note>
+
+---
+
+### apex_check_requirements
+
+Verify that all apex-mcp requirements are met in the current environment. Runs a checklist of `PASS` / `FAIL` tests and returns remediation steps for each failure.
+
+This tool takes no parameters.
+
+**Checks performed:**
+- `fastmcp` Python package is installed
+- `oracledb` Python package is installed
+- All six required environment variables are set (`ORACLE_DB_USER`, `ORACLE_DB_PASS`, `ORACLE_DSN`, `ORACLE_WALLET_DIR`, `ORACLE_WALLET_PASSWORD`, `APEX_WORKSPACE_ID`)
+- Wallet directory exists and contains the required files (`tnsnames.ora`, `sqlnet.ora`, `cwallet.sso`)
+- Database connection is active (if `apex_connect` has already been called)
+- `APEX_APPLICATIONS` dictionary view is accessible (if connected)
+- `WWV_FLOW_PAGE_PLUGS` internal table is accessible (if connected — required for editing existing apps)
+
+**Returns:** JSON with `summary` (e.g., `"8 passed, 1 failed"`), `all_good` boolean, an array of `checks` (each with `check`, `status`, `detail`, and `fix`), and a `next_step` recommendation.
+
+```json
+{
+  "summary": "9 passed, 0 failed",
+  "all_good": true,
+  "checks": [
+    { "check": "fastmcp installed", "status": "PASS", "detail": "fastmcp available", "fix": "" },
+    { "check": "env:ORACLE_DB_USER", "status": "PASS", "detail": "Set to: MY_***", "fix": "" },
+    { "check": "wallet directory", "status": "PASS", "detail": "Found at /path/to/wallet with all required files", "fix": "" }
+  ],
+  "next_step": "Call apex_connect() to connect to the database."
+}
+```
+
+**Example:**
+
+```python
+# Run before apex_connect to catch config issues early
+apex_check_requirements()
+```
+
+<Note>
+  Environment variable values are masked in the output (only the first 3 characters are shown) to avoid leaking credentials in logs or chat history.
+</Note>
+
+---
+
+### apex_check_permissions
+
+Check what database permissions the current user has for APEX operations. Verifies `SELECT`, `EXECUTE`, `UPDATE`, and `DELETE` privileges on all key APEX objects and reports which features are available vs. which require additional grants.
+
+This tool takes no parameters. Requires an active database connection.
+
+**Objects checked:**
+- **APEX dictionary views** (`SELECT`): `APEX_APPLICATIONS`, `APEX_APPLICATION_PAGES`, `APEX_APPLICATION_PAGE_REGIONS`, `APEX_APPLICATION_PAGE_ITEMS`, `APEX_APPLICATION_PAGE_PROC`, `APEX_APPLICATION_AUTHORIZATION`, `APEX_APPLICATION_LOV`
+- **APEX packages** (`EXECUTE`): `APEX_UTIL`, `WWV_FLOW_IMP`, `WWV_FLOW_IMP_SHARED`, `WWV_IMP_WORKSPACE`, `WWV_FLOW_IMP_PAGE`
+- **Internal tables** (`SELECT` / `UPDATE` / `DELETE`): `WWV_FLOW_PAGE_PLUGS`, `WWV_FLOW_STEP_ITEMS`, `WWV_FLOW_STEPS`
+
+**Returns:** JSON with `user`, `dsn`, a `permissions` array (each entry includes `object`, `privilege`, `granted`, and `needed_for`), a `summary` count, and a `grant_script` to run as `ADMIN` or `SYS` if any grants are missing.
+
+```json
+{
+  "user": "MY_SCHEMA",
+  "dsn": "mydb_tp",
+  "permissions": [
+    { "object": "APEX_APPLICATIONS", "privilege": "SELECT", "granted": true, "needed_for": "Inspect/discovery tools" },
+    { "object": "WWV_FLOW_PAGE_PLUGS", "privilege": "SELECT/UPDATE/DELETE", "granted": true, "update_granted": true, "delete_granted": false, "needed_for": "Editing tools" }
+  ],
+  "summary": "11/12 permissions confirmed",
+  "grant_script": "GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO MY_SCHEMA; ..."
+}
+```
+
+**Example:**
+
+```python
+# After connecting, check what operations are available
+apex_connect()
+apex_check_permissions()
+```
+
+<Warning>
+  If `EXECUTE` grants on `WWV_FLOW_IMP` and related packages are missing, `apex_create_app` and all component-creation tools will fail. If `UPDATE`/`DELETE` grants on `WWV_FLOW_*` tables are missing, editing tools (`apex_update_region`, `apex_delete_page`, etc.) will fail. Use `apex_fix_permissions` or the returned `grant_script` to resolve.
+</Warning>
+
+---
+
+### apex_fix_permissions
+
+Attempt to automatically grant the permissions required for inspect and edit operations on APEX internal tables. Executes `GRANT` statements for `UPDATE`/`DELETE` on `WWV_FLOW_PAGE_PLUGS`, `WWV_FLOW_STEP_ITEMS`, and `WWV_FLOW_STEPS` for the currently connected user.
+
+This tool takes no parameters. Requires an active database connection.
+
+**Returns:** JSON with `current_user`, a `grants` array (each entry has `statement`, `status`, and optionally `error`), `grant_script` (the complete SQL to run manually if needed), and a human-readable `summary`.
+
+```json
+{
+  "current_user": "MY_SCHEMA",
+  "grants": [
+    { "statement": "GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO MY_SCHEMA", "status": "ok" },
+    { "statement": "GRANT SELECT, DELETE ON WWV_FLOW_STEPS TO MY_SCHEMA", "status": "error", "error": "ORA-01031: insufficient privileges" }
+  ],
+  "grant_script": "GRANT SELECT, UPDATE, DELETE ON WWV_FLOW_PAGE_PLUGS TO MY_SCHEMA;\n...",
+  "summary": "1 grant(s) applied, 1 failed. Ask your DBA to run the failed statements manually."
+}
+```
+
+**Example:**
+
+```python
+apex_connect()
+apex_fix_permissions()   # attempt auto-fix
+apex_check_permissions() # verify what succeeded
+```
+
+<Warning>
+  `GRANT` statements on `WWV_FLOW_*` tables must be executed by `ADMIN` or `SYS`. If `apex_fix_permissions` fails with `ORA-01031`, copy the `grant_script` from the response and ask your DBA to run it directly in SQL*Plus or Oracle Cloud SQL Worksheet.
+</Warning>
+
+---
+
+### apex_refresh_templates
+
+Refresh Universal Theme 42 template IDs by querying the live database. Template IDs are workspace-specific — they vary between APEX instances and can change after APEX upgrades. apex-mcp auto-discovers them on every `apex_connect`, but call this tool explicitly when you switch to a different workspace or APEX instance without reconnecting.
+
+This tool takes no parameters. Requires an active database connection.
+
+**Returns:** JSON with `status`, a `discovered` object (the new template ID map), a `changed` boolean, and a `message` indicating whether values changed.
+
+```json
+{
+  "status": "ok",
+  "discovered": {
+    "PAGE_TMPL_STANDARD": 4072363437683917891,
+    "PAGE_TMPL_LOGIN": 7959518786416816158,
+    "PAGE_TMPL_DIALOG": 4507752863181313877
+  },
+  "changed": false,
+  "message": "Template IDs refreshed from database (no changes)"
+}
+```
+
+**Example:**
+
+```python
+# After pointing to a different APEX workspace
+apex_refresh_templates()
+```
+
+<Note>
+  Template IDs are automatically refreshed every time `apex_connect` is called, so you only need `apex_refresh_templates` explicitly when you change the target workspace mid-session without reconnecting.
+</Note>
+
+---
+
+### apex_health_check
+
+Run a comprehensive health check on the apex-mcp environment. Checks database connectivity and latency, APEX workspace accessibility, template ID validity, session state, and configuration completeness. Assigns an overall status of `pass`, `warn`, or `fail`.
+
+This tool takes no parameters.
+
+**Checks performed:**
+
+| Check | Pass | Warn | Fail |
+|---|---|---|---|
+| `database_connection` | Connected, latency &lt; 500ms | Connected, latency ≥ 500ms | Not connected |
+| `apex_workspace` | Workspace accessible, app count returned | — | Exception querying workspace |
+| `template_ids` | `PAGE_TMPL_STANDARD` &gt; 0 | IDs not discovered yet | — |
+| `session_state` | Active session, finalized, or idle (all pass) | — | — |
+| `configuration` | All required env vars set | — | Any required env var missing |
+
+**Returns:** JSON with `status` (`"pass"`, `"warn"`, or `"fail"`) and a `checks` array where each entry has `check`, `status`, and `detail`.
+
+```json
+{
+  "status": "pass",
+  "checks": [
+    { "check": "database_connection", "status": "pass", "detail": "Connected, latency 42ms" },
+    { "check": "apex_workspace", "status": "pass", "detail": "Workspace 'MYWORKSPACE' accessible, 5 apps found" },
+    { "check": "template_ids", "status": "pass", "detail": "PAGE_TMPL_STANDARD = 4072363437683917891" },
+    { "check": "session_state", "status": "pass", "detail": "No active session (ready to create app)" },
+    { "check": "configuration", "status": "pass", "detail": "All required env vars set (APEX 24.2)" }
+  ]
+}
+```
+
+**Example:**
+
+```python
+# Run before starting a development session to ensure everything is ready
+apex_connect()
+apex_health_check()
+```
+
+---
+
+### apex_get_audit_log
+
+Return recent audit log entries for the current session. Useful for debugging, reviewing what tools have been called, and compliance tracing.
+
+<ParamField path="limit" type="integer" default="50">
+  Maximum number of entries to return, sorted newest first. Default is 50.
+</ParamField>
+
+**Returns:** JSON with `status`, `count`, and an `entries` array where each entry includes the timestamp, tool name, status, and duration.
+
+```json
+{
+  "status": "ok",
+  "count": 3,
+  "entries": [
+    { "timestamp": "2024-11-15T10:23:01Z", "tool": "apex_connect", "status": "ok", "duration_ms": 312 },
+    { "timestamp": "2024-11-15T10:23:05Z", "tool": "apex_create_app", "status": "ok", "duration_ms": 845 },
+    { "timestamp": "2024-11-15T10:23:08Z", "tool": "apex_add_page", "status": "ok", "duration_ms": 124 }
+  ]
+}
+```
+
+**Example:**
+
+```python
+# Review last 10 operations
+apex_get_audit_log(limit=10)
+
+# Get full session history (default 50)
+apex_get_audit_log()
+```

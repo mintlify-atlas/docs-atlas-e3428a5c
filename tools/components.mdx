@@ -1,0 +1,787 @@
+---
+title: "Page Components: Regions, Items, Buttons, Processes"
+sidebarTitle: "Components"
+description: "Reference for apex-mcp component tools: add and manage regions, form items, buttons, page processes, and dynamic actions on Oracle APEX pages."
+---
+
+Regions, items, buttons, processes, and dynamic actions are the fundamental building blocks of every Oracle APEX page. apex-mcp exposes tools to create each component type programmatically — the same operations you would perform in the App Builder UI, but driven entirely by your AI assistant. Components are always added to a page that belongs to an active import session started with `apex_create_app`. The typical authoring order is: create a region → add items to that region → add buttons → add processes triggered by those buttons → optionally attach dynamic actions for client-side behaviour.
+
+---
+
+## Regions
+
+A region is a named container that holds other components and renders as a section on the page. APEX supports many native region types; apex-mcp maps a short friendly name to each one.
+
+### apex_add_region
+
+Add a region to an APEX page.
+
+```python
+apex_add_region(
+    page_id=10,
+    region_name="Employee List",
+    region_type="ir",
+    source_sql="SELECT emp_id, first_name, last_name, salary FROM employees ORDER BY last_name",
+    sequence=10,
+    grid_column="BODY",
+)
+```
+
+<ParamField path="page_id" type="int" required>
+  The numeric ID of the page to add the region to. The page must already exist (created with `apex_add_page`).
+</ParamField>
+
+<ParamField path="region_name" type="string" required>
+  Display name shown in the region header and in the App Builder tree.
+</ParamField>
+
+<ParamField path="region_type" type="string" default="static">
+  Type of region. Accepted values:
+
+  | Value | Description |
+  |-------|-------------|
+  | `static` / `html` | Static HTML content (provide `static_content`) |
+  | `ir` | Interactive Report — best for data grids (provide `source_sql`) |
+  | `form` | Form container — create the region first, then add items with `apex_add_item` |
+  | `chart` | Oracle JET Chart (provide `source_sql`) |
+  | `plsql` | PL/SQL Dynamic Content (provide `source_sql`) |
+  | `cards` | Native Cards region |
+  | `list` | Native List region |
+  | `tree` | Native Tree region |
+  | `map` | Native Map region |
+</ParamField>
+
+<ParamField path="source_sql" type="string">
+  SQL query for `ir`, `chart`, and `plsql` region types. Always include a `WHERE` clause and column aliases for readability.
+</ParamField>
+
+<ParamField path="static_content" type="string">
+  Raw HTML for `static` / `html` region types.
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">
+  Display order on the page. Use multiples of 10 (10, 20, 30) to allow future insertions between regions.
+</ParamField>
+
+<ParamField path="template" type="string">
+  Override the default region template ID. Uses the type-appropriate default when omitted.
+</ParamField>
+
+<ParamField path="grid_column" type="string" default="BODY">
+  Page layout slot. Options: `BODY`, `BREADCRUMB_BAR`, `AFTER_HEADER`, `BEFORE_FOOTER`, `AFTER_FOOTER`.
+</ParamField>
+
+<ParamField path="attributes" type="dict">
+  Extra template option key/value pairs merged into the template options string.
+</ParamField>
+
+<ParamField path="labels" type="dict">
+  Custom label overrides for Interactive Report regions. Supported keys: `no_data_found` and `max_row_count`. English defaults are used when omitted.
+</ParamField>
+
+<ParamField path="download_formats" type="string" default="CSV:HTML:XLSX:PDF">
+  Colon-separated list of download formats enabled in Interactive Report toolbars.
+</ParamField>
+
+**Returns** — JSON object:
+
+```json
+{
+  "status": "ok",
+  "region_id": 12345,
+  "page_id": 10,
+  "region_name": "Employee List",
+  "region_type": "ir",
+  "sequence": 10,
+  "message": "Region 'Employee List' added to page 10."
+}
+```
+
+<Note>
+  For Interactive Report regions, apex-mcp automatically creates the underlying worksheet definition (`create_worksheet`) including pagination, download formats, and notification settings.
+</Note>
+
+---
+
+### apex_list_regions
+
+List all regions on a specific page, reading live data from `APEX_APPLICATION_PAGE_REGIONS`.
+
+```python
+apex_list_regions(app_id=100, page_id=10)
+```
+
+<ParamField path="app_id" type="int" required>
+  Application ID.
+</ParamField>
+
+<ParamField path="page_id" type="int" required>
+  Page ID to inspect.
+</ParamField>
+
+**Returns** — `{ "status": "ok", "data": [...], "count": N }` where each element includes `region_id`, `region_name`, `region_type`, `display_sequence`, `source_type`, `region_source`, `authorization_scheme`, `condition_type`, and `region_template`.
+
+---
+
+### apex_update_region
+
+Update properties of an existing region. Uses a direct `UPDATE` on the internal `WWV_FLOW_PAGE_PLUGS` table.
+
+```python
+apex_update_region(
+    app_id=100,
+    page_id=10,
+    region_name="Employee List",
+    new_source_sql="SELECT emp_id, first_name, last_name, dept_id FROM employees WHERE active = 'Y' ORDER BY last_name",
+    new_sequence=20,
+)
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Current exact name of the region to update.</ParamField>
+<ParamField path="new_name" type="string">New display name for the region.</ParamField>
+<ParamField path="new_source_sql" type="string">New SQL source for IR or chart regions.</ParamField>
+<ParamField path="new_static_content" type="string">New HTML content for static regions.</ParamField>
+<ParamField path="new_sequence" type="int">New display sequence number.</ParamField>
+<ParamField path="new_auth_scheme" type="string">New authorization scheme name.</ParamField>
+<ParamField path="new_condition_type" type="string">New condition type controlling region visibility.</ParamField>
+<ParamField path="new_condition_expr" type="string">New condition expression.</ParamField>
+
+<Warning>
+  `apex_update_region` writes directly to APEX internal tables, bypassing App Builder validation. Always verify the result in the App Builder UI. The DB user needs `UPDATE` privilege on `WWV_FLOW_PAGE_PLUGS`.
+</Warning>
+
+---
+
+### apex_delete_region
+
+Permanently delete a region and all its child items, buttons, and sub-regions.
+
+```python
+apex_delete_region(app_id=100, page_id=10, region_name="Old Report")
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Exact region name (case-insensitive). Use `apex_list_regions` to confirm the name first.</ParamField>
+
+**Returns** — JSON confirming how many child items were also deleted.
+
+<Warning>
+  Deletion is permanent and cascades to all child items and buttons. Export the app before deleting regions you may need to restore.
+</Warning>
+
+---
+
+## Items
+
+Page items are the input controls (text fields, select lists, date pickers, etc.) that live inside a region. APEX requires items to follow the naming convention `P{page_id}_{NAME}` — apex-mcp enforces this automatically, prepending the prefix if you omit it.
+
+### apex_add_item
+
+Add a single form item to a region.
+
+```python
+apex_add_item(
+    page_id=10,
+    region_name="Employee Form",
+    item_name="FIRST_NAME",          # auto-prefixed → P10_FIRST_NAME
+    item_type="text",
+    label="First Name",
+    sequence=10,
+    source_column="FIRST_NAME",
+    is_required=True,
+)
+```
+
+<ParamField path="page_id" type="int" required>Page ID that owns the item.</ParamField>
+<ParamField path="region_name" type="string" required>Name of the parent region (must already exist via `apex_add_region`).</ParamField>
+<ParamField path="item_name" type="string" required>
+  Item name following the `P{page_id}_{NAME}` convention. Automatically prefixed with `P{page_id}_` if you supply only the bare name (e.g. `"FIRST_NAME"` becomes `"P10_FIRST_NAME"`).
+</ParamField>
+
+<ParamField path="item_type" type="string" default="text">
+  Input type. Supported values:
+
+  | Value | APEX control |
+  |-------|--------------|
+  | `text` | Text input |
+  | `number` | Numeric input with automatic validation |
+  | `date` | Date picker (APEX native popup) |
+  | `select` | Select list — requires `lov_name` |
+  | `hidden` | Hidden field (no label rendered) |
+  | `textarea` | Multi-line text input |
+  | `yes_no` / `switch` | Yes/No toggle switch |
+  | `password` | Masked password field |
+  | `display` | Display-only, non-editable |
+  | `checkbox` | Checkbox group — requires `lov_name` |
+  | `radio` | Radio button group — requires `lov_name` |
+  | `rich_text` | Rich text (WYSIWYG) editor |
+  | `color_picker` | Colour picker |
+  | `star_rating` | Star rating input |
+  | `slider` | Range slider |
+  | `qr_code` | QR code display |
+</ParamField>
+
+<ParamField path="label" type="string">
+  Display label shown above or beside the field. Auto-generated from the item name (stripping the `P{n}_` prefix and title-casing) when omitted.
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">Display order within the region.</ParamField>
+
+<ParamField path="source_column" type="string">
+  Database column name for automatic DML binding. Enables the item to be pre-populated from the database when the page loads in edit mode (e.g. `"FIRST_NAME"`).
+</ParamField>
+
+<ParamField path="lov_name" type="string">
+  Shared LOV name (from `apex_add_lov`) or inline SQL query for `select`, `radio`, and `checkbox` items. Inline SQL that starts with `SELECT` or `WITH` is bound with `p_lov`; a named LOV uses `p_named_lov`.
+</ParamField>
+
+<ParamField path="is_required" type="boolean" default="false">
+  Show the required indicator (*) and apply a NOT NULL field template.
+</ParamField>
+
+<ParamField path="placeholder" type="string">Placeholder text shown inside empty text inputs.</ParamField>
+
+<ParamField path="default_value" type="string">
+  Default item value. Supports APEX substitution strings, e.g. `"&APP_USER."`.
+</ParamField>
+
+<ParamField path="read_only" type="boolean" default="false">
+  Render the item as read-only (value displayed but not editable by the user).
+</ParamField>
+
+<ParamField path="colspan" type="int" default="1">
+  Number of grid columns to span (1–12). Use values greater than 1 for wide fields.
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "item_id": 98765,
+  "item_name": "P10_FIRST_NAME",
+  "item_type": "text",
+  "page_id": 10,
+  "region_name": "Employee Form",
+  "label": "First Name",
+  "sequence": 10,
+  "message": "Item 'P10_FIRST_NAME' added to region 'Employee Form' on page 10."
+}
+```
+
+---
+
+### apex_list_items
+
+List all items on a page, optionally scoped to a single region.
+
+```python
+apex_list_items(app_id=100, page_id=10)
+apex_list_items(app_id=100, page_id=10, region_name="Employee Form")
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="region_name" type="string">Filter results to this region only. Empty string returns items from all regions.</ParamField>
+
+**Returns** — `{ "status": "ok", "data": [...], "count": N }`. Each element includes `item_name`, `item_label`, `item_type`, `sequence`, `region`, `default_value`, `source_column`, `lov_definition`, `placeholder`, `colspan`, and condition fields.
+
+---
+
+### apex_update_item
+
+Update properties of an existing page item using a direct `UPDATE` on `WWV_FLOW_STEP_ITEMS`.
+
+```python
+apex_update_item(
+    app_id=100,
+    page_id=10,
+    item_name="P10_STATUS",
+    new_label="Employment Status",
+    new_default_value="ACTIVE",
+)
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="item_name" type="string" required>Exact item name, e.g. `P10_STATUS`.</ParamField>
+<ParamField path="new_label" type="string">New display label.</ParamField>
+<ParamField path="new_item_type" type="string">New APEX native type string (e.g. `NATIVE_TEXT_FIELD`, `NATIVE_SELECT_LIST`).</ParamField>
+<ParamField path="new_default_value" type="string">New default value expression.</ParamField>
+<ParamField path="new_source_column" type="string">New database source column for DML binding.</ParamField>
+<ParamField path="new_lov_definition" type="string">New LOV query for select lists.</ParamField>
+<ParamField path="new_is_required" type="boolean">Set required (`true`) or optional (`false`).</ParamField>
+<ParamField path="new_placeholder" type="string">New placeholder text.</ParamField>
+<ParamField path="new_read_only" type="boolean">Set read-only (`true`) or editable (`false`).</ParamField>
+
+<Warning>
+  Direct table updates bypass APEX UI validation. Verify changes in App Builder afterwards. The DB user needs `UPDATE` on `WWV_FLOW_STEP_ITEMS`.
+</Warning>
+
+---
+
+### apex_delete_item
+
+Permanently delete a single item from a page.
+
+```python
+apex_delete_item(app_id=100, page_id=10, item_name="P10_OLD_FIELD")
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="item_name" type="string" required>Exact item name (case-insensitive). Use `apex_list_items` to confirm the name.</ParamField>
+
+<Warning>
+  Deletion is permanent. Any validations or computations referencing this item will produce errors at runtime.
+</Warning>
+
+---
+
+### apex_bulk_add_items
+
+Add multiple form items to a region in a single call. More efficient than calling `apex_add_item` once per field when building forms.
+
+```python
+apex_bulk_add_items(
+    page_id=10,
+    region_name="Employee Form",
+    items=[
+        {"name": "FIRST_NAME",  "label": "First Name",  "type": "text",     "required": True},
+        {"name": "LAST_NAME",   "label": "Last Name",   "type": "text",     "required": True},
+        {"name": "HIRE_DATE",   "label": "Hire Date",   "type": "date"},
+        {"name": "DEPT_ID",     "label": "Department",  "type": "select",   "lov": "SELECT dept_name d, dept_id r FROM departments ORDER BY 1"},
+        {"name": "SALARY",      "label": "Salary",      "type": "number"},
+        {"name": "EMP_ID",                               "type": "hidden"},
+    ],
+    start_sequence=10,
+)
+```
+
+<ParamField path="page_id" type="int" required>Target page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Parent region name (must already exist).</ParamField>
+<ParamField path="items" type="array" required>
+  List of item descriptor objects. Each object supports:
+
+  | Key | Type | Required | Description |
+  |-----|------|----------|-------------|
+  | `name` | string | ✅ | Item name, auto-prefixed with `P{page_id}_` |
+  | `label` | string | | Display label; auto-generated if omitted |
+  | `type` | string | | `text` \| `number` \| `date` \| `select` \| `textarea` \| `hidden` \| `yes_no` \| `password` |
+  | `required` | boolean | | Shows required indicator |
+  | `lov` | string | | LOV SQL for `select` type |
+  | `default` | string | | Default value |
+  | `placeholder` | string | | Placeholder text |
+  | `colspan` | int | | Grid columns to span (1–12) |
+</ParamField>
+
+<ParamField path="start_sequence" type="int" default="10">
+  Sequence number for the first item. Each subsequent item increments by 10.
+</ParamField>
+
+**Returns** — JSON with `items_created` list (the successfully created item names) and any `errors`.
+
+---
+
+## Buttons
+
+Buttons trigger page submission or redirect navigation. They live inside a region and can be conditional.
+
+### apex_add_button
+
+Add a button to a region.
+
+```python
+# Primary save button
+apex_add_button(
+    page_id=10,
+    region_name="Employee Form",
+    button_name="SAVE",
+    label="Save",
+    action="submit",
+    hot=True,
+    sequence=10,
+    position="BELOW_BOX",
+)
+
+# Cancel button (redirect)
+apex_add_button(
+    page_id=10,
+    region_name="Employee Form",
+    button_name="CANCEL",
+    label="Cancel",
+    action="redirect",
+    url="f?p=&APP_ID.:1:&APP_SESSION.::&DEBUG.:::",
+    sequence=20,
+)
+
+# Delete button (only shown when editing an existing record)
+apex_add_button(
+    page_id=10,
+    region_name="Employee Form",
+    button_name="DELETE",
+    label="Delete",
+    action="submit",
+    sequence=30,
+    condition_type="ITEM_IS_NOT_NULL",
+    condition_expr="P10_EMP_ID",
+)
+```
+
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="region_name" type="string" required>Parent region name (must already exist).</ParamField>
+<ParamField path="button_name" type="string" required>
+  Internal button name (stored in uppercase). Conventional names: `CREATE`, `SAVE`, `DELETE`, `CANCEL`. Used to wire processes via `condition_button` in `apex_add_process`.
+</ParamField>
+<ParamField path="label" type="string" required>Button label text visible to the user.</ParamField>
+
+<ParamField path="action" type="string" default="submit">
+  Button behaviour:
+
+  | Value | Behaviour |
+  |-------|-----------|
+  | `submit` | Submit the page — triggers all page processes |
+  | `redirect` | Navigate to `url` without submitting |
+  | `da` | Defined by Dynamic Action — no built-in action |
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">Display order among buttons in the region.</ParamField>
+
+<ParamField path="position" type="string" default="BELOW_BOX">
+  Placement relative to region content: `BELOW_BOX`, `ABOVE_BOX`, or `RIGHT_OF_TITLE`.
+</ParamField>
+
+<ParamField path="hot" type="boolean" default="false">
+  Mark as the primary action (filled/highlighted style). Use `true` for the main Save or Submit button.
+</ParamField>
+
+<ParamField path="icon" type="string">
+  Font APEX icon class, e.g. `"fa-save"` or `"fa-trash-o"`. When provided, the icon-button template is used automatically.
+</ParamField>
+
+<ParamField path="url" type="string">
+  Redirect URL for `action="redirect"`. Supports APEX substitution strings, e.g. `"f?p=&APP_ID.:1:&APP_SESSION.::&DEBUG.:::"`.
+</ParamField>
+
+<ParamField path="condition_type" type="string">
+  Controls when the button is rendered. Common values: `ITEM_IS_NOT_NULL` (show when item has a value), `ITEM_IS_NULL` (show when item is empty).
+</ParamField>
+
+<ParamField path="condition_expr" type="string">
+  Item name or expression for the condition. E.g. `"P10_EMP_ID"` to show DELETE only when editing an existing record.
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "button_id": 54321,
+  "button_name": "SAVE",
+  "label": "Save",
+  "action": "SUBMIT_PAGE",
+  "page_id": 10,
+  "region_name": "Employee Form",
+  "hot": true,
+  "message": "Button 'SAVE' added to region 'Employee Form' on page 10."
+}
+```
+
+<Note>
+  apex-mcp stores the button ID in session state so that `apex_add_process` can wire a `condition_button` to the correct button using `wwv_flow_imp.id(...)` automatically.
+</Note>
+
+---
+
+### apex_delete_button
+
+Permanently delete a button from a page.
+
+```python
+apex_delete_button(app_id=100, page_id=10, button_name="DELETE")
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="button_name" type="string" required>Exact button name (case-insensitive).</ParamField>
+
+<Warning>
+  Deletion is permanent. Any page processes conditioned on this button will lose their trigger and run on every submit instead.
+</Warning>
+
+---
+
+## Processes
+
+Page processes are server-side actions that run during the page submission lifecycle. The most common types are Automatic DML (insert/update/delete against a table) and custom PL/SQL blocks.
+
+### apex_add_process
+
+Add a server-side process to a page.
+
+<Tabs>
+  <Tab title="DML Process">
+    ```python
+    apex_add_process(
+        page_id=10,
+        process_name="Save Employee",
+        process_type="dml",
+        table_name="EMPLOYEES",
+        return_pk_item="P10_EMP_ID",
+        condition_button="SAVE",
+        success_message="Employee saved successfully.",
+        sequence=10,
+    )
+    ```
+  </Tab>
+  <Tab title="PL/SQL Process">
+    ```python
+    apex_add_process(
+        page_id=10,
+        process_name="Send Welcome Email",
+        process_type="plsql",
+        source="""
+    begin
+      send_email(
+        p_to      => :P10_EMAIL,
+        p_subject => 'Welcome!',
+        p_body    => 'Your account has been created.'
+      );
+    end;
+    """,
+        condition_button="SAVE",
+        sequence=20,
+    )
+    ```
+  </Tab>
+  <Tab title="AJAX Callback">
+    ```python
+    apex_add_process(
+        page_id=10,
+        process_name="SEARCH_EMPLOYEES",
+        process_type="ajax",
+        source="""
+    begin
+      for r in (select emp_id, first_name || ' ' || last_name full_name
+                  from employees
+                 where upper(last_name) like '%' || upper(:P10_SEARCH) || '%')
+      loop
+        apex_json.open_object;
+        apex_json.write('id', r.emp_id);
+        apex_json.write('name', r.full_name);
+        apex_json.close_object;
+      end loop;
+    end;
+    """,
+        sequence=10,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="process_name" type="string" required>Display name for the process.</ParamField>
+
+<ParamField path="process_type" type="string" default="dml">
+  Type of process:
+
+  | Value | Behaviour |
+  |-------|-----------|
+  | `dml` | Automatic DML — INSERT/UPDATE/DELETE against `table_name`; requires `table_name` |
+  | `plsql` | Custom PL/SQL anonymous block; provide `source` |
+  | `ajax` | AJAX Callback — PL/SQL callable via `apex.server.process()`; runs at `ON_DEMAND` |
+  | `close_dialog` | Close a modal dialog |
+  | `clear_cache` | Clear page cache |
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">Execution order when multiple processes exist.</ParamField>
+<ParamField path="source" type="string">PL/SQL source block for `plsql` and `ajax` types.</ParamField>
+<ParamField path="table_name" type="string">Table name for `dml` type, e.g. `"EMPLOYEES"`. Stored in uppercase.</ParamField>
+<ParamField path="return_pk_item" type="string">Page item to receive the returned primary key after an INSERT operation.</ParamField>
+
+<ParamField path="condition_button" type="string">
+  Button name that must have been clicked to trigger this process. Leave empty to run on every submit. apex-mcp resolves the button name to its internal ID automatically using session state.
+</ParamField>
+
+<ParamField path="success_message" type="string">Notification message shown to the user on success.</ParamField>
+<ParamField path="error_message" type="string">Custom inline error message displayed on failure.</ParamField>
+
+<ParamField path="point" type="string" default="AFTER_SUBMIT">
+  Execution point in the page lifecycle: `AFTER_SUBMIT`, `BEFORE_HEADER`, or `ON_SUBMIT_BEFORE_COMPUTATION`. AJAX processes always use `ON_DEMAND` regardless of this setting.
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "process_id": 11111,
+  "process_name": "Save Employee",
+  "process_type": "NATIVE_AUTOMATIC_DML",
+  "exec_point": "AFTER_SUBMIT",
+  "page_id": 10,
+  "condition_button": "SAVE",
+  "message": "Process 'Save Employee' added to page 10."
+}
+```
+
+---
+
+### apex_list_processes
+
+List all server-side processes on a page.
+
+```python
+apex_list_processes(app_id=100, page_id=10)
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+
+**Returns** — `{ "status": "ok", "data": [...], "count": N }`. Each element includes `process_name`, `process_type`, `process_sequence`, `process_point`, `process_sql`, `condition_type`, `when_button_pressed`, `success_message`, and `error_message`.
+
+---
+
+## Dynamic Actions
+
+Dynamic Actions (DAs) are client-side event handlers defined declaratively in APEX. They react to browser events (click, change, page load, etc.) and execute one or more actions in TRUE and/or FALSE branches without writing raw JavaScript event listeners.
+
+### apex_add_dynamic_action
+
+Add a Dynamic Action to a page.
+
+<Tabs>
+  <Tab title="Show / Hide on Change">
+    ```python
+    # Show P10_MANAGER_ID only when DEPT_ID is not null; hide it otherwise
+    apex_add_dynamic_action(
+        page_id=10,
+        da_name="Toggle Manager Field",
+        event="change",
+        trigger_element="P10_DEPT_ID",
+        action_type="show",
+        affected_element="P10_MANAGER_ID",
+        false_action_type="hide",
+        false_affected_element="P10_MANAGER_ID",
+        fire_on_init=True,
+    )
+    ```
+  </Tab>
+  <Tab title="Execute JavaScript on Click">
+    ```python
+    apex_add_dynamic_action(
+        page_id=10,
+        da_name="Confirm Delete",
+        event="click",
+        trigger_element="DELETE",
+        action_type="execute_javascript",
+        javascript_code="""
+    if (!confirm('Are you sure you want to delete this record?')) {
+      apex.event.gCancelFlag = true;
+    }
+    """,
+        sequence=10,
+    )
+    ```
+  </Tab>
+  <Tab title="On Page Load">
+    ```python
+    apex_add_dynamic_action(
+        page_id=10,
+        da_name="Initialize Form",
+        event="page-load",
+        action_type="execute_javascript",
+        javascript_code="apex.item('P10_STATUS').setValue('ACTIVE');",
+        fire_on_init=False,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+<ParamField path="da_name" type="string" required>Unique name for this Dynamic Action.</ParamField>
+
+<ParamField path="event" type="string" default="click">
+  Triggering browser event:
+
+  | Value | When it fires |
+  |-------|---------------|
+  | `click` | Element clicked |
+  | `change` | Item value changes |
+  | `page-load` | DOM ready (page first renders) |
+  | `keydown` | Key pressed |
+  | `custom` | Custom jQuery event |
+</ParamField>
+
+<ParamField path="trigger_element" type="string">
+  Item name (e.g. `P10_DEPT_ID`) or button name that fires the event. Item names starting with `P` followed by a digit and an underscore are treated as page items; everything else is treated as a jQuery selector. Leave empty for page-level events such as `page-load`.
+</ParamField>
+
+<ParamField path="action_type" type="string" default="execute_javascript">
+  Action executed in the TRUE branch:
+
+  | Value | What it does |
+  |-------|--------------|
+  | `execute_javascript` | Run `javascript_code` |
+  | `submit_page` | Submit the APEX page |
+  | `set_value` | Set an item value |
+  | `show` | Show an element |
+  | `hide` | Hide an element |
+  | `enable` | Enable an item |
+  | `disable` | Disable an item |
+  | `refresh` | Refresh a region |
+  | `plsql` | Run `plsql_code` via AJAX |
+</ParamField>
+
+<ParamField path="javascript_code" type="string">JavaScript to execute in the TRUE branch (for `execute_javascript`). Has access to `apex.item()` and `apex.server.process()`.</ParamField>
+<ParamField path="plsql_code" type="string">PL/SQL block for the TRUE branch (for `plsql` action type). References page items via `:ITEM_NAME` bind variables.</ParamField>
+<ParamField path="affected_element" type="string">Item or region name affected by the TRUE branch action.</ParamField>
+<ParamField path="sequence" type="int" default="10">Execution order.</ParamField>
+<ParamField path="fire_on_init" type="boolean" default="false">Also execute the TRUE branch action when the page first loads.</ParamField>
+
+<ParamField path="false_action_type" type="string">
+  Action type for the FALSE branch. When provided, a FALSE branch action is created alongside the TRUE branch. Use with `action_type="show"` / `false_action_type="hide"` for symmetric conditional visibility.
+</ParamField>
+<ParamField path="false_javascript_code" type="string">JavaScript for the FALSE branch (for `execute_javascript` false action).</ParamField>
+<ParamField path="false_affected_element" type="string">Item or region name affected by the FALSE branch action.</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "da_id": 22222,
+  "da_name": "Toggle Manager Field",
+  "event": "change",
+  "action_type": "NATIVE_SHOW",
+  "page_id": 10,
+  "trigger_element": "P10_DEPT_ID",
+  "affected_element": "P10_MANAGER_ID",
+  "fire_on_init": true,
+  "has_false_branch": true,
+  "warnings": [],
+  "message": "Dynamic Action 'Toggle Manager Field' added to page 10."
+}
+```
+
+<Note>
+  apex-mcp validates JavaScript for unsafe patterns (`eval()`, `document.write()`) and returns warnings in the response `warnings` array. The action is still created — the warnings are advisory.
+</Note>
+
+---
+
+### apex_list_dynamic_actions
+
+List all Dynamic Actions on a page, each with their nested action steps.
+
+```python
+apex_list_dynamic_actions(app_id=100, page_id=10)
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+
+**Returns** — `{ "status": "ok", "data": [...], "count": N }`. Each element contains the DA event header plus an `actions` array of action steps. Action steps include `action`, `action_sequence`, `affected_elements`, and `javascript_code`.

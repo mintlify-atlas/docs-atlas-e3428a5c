@@ -1,0 +1,184 @@
+---
+title: "Connect apex-mcp to OpenAI Agents SDK"
+sidebarTitle: "GPT / OpenAI"
+description: "Use apex-mcp with the OpenAI Agents SDK via streamable-HTTP transport. Start the server on port 8000 and connect with MCPServerStreamableHttp."
+---
+
+Unlike Claude, Cursor, and Gemini — which all communicate with apex-mcp over stdio — the OpenAI Agents SDK requires an HTTP-based transport. apex-mcp supports this natively via its `streamable-http` mode: you start the server as a local HTTP endpoint and then connect to it from Python using `MCPServerStreamableHttp`. This approach gives OpenAI models access to all 116 Oracle APEX tools for automated, code-driven workflows.
+
+<Note>
+  The OpenAI Agents SDK does **not** support stdio transport. You must start apex-mcp with `--transport streamable-http` before connecting from Python code.
+</Note>
+
+---
+
+## Setup with the OpenAI Agents SDK
+
+<Steps>
+  <Step title="Start apex-mcp in HTTP mode">
+    Export your Oracle and APEX credentials as environment variables, then launch apex-mcp with the `streamable-http` transport:
+
+    ```bash
+    export ORACLE_DB_USER=YOUR_SCHEMA
+    export ORACLE_DB_PASS=YOUR_PASSWORD
+    export ORACLE_DSN=YOUR_DSN
+    export ORACLE_WALLET_DIR=/path/to/wallet
+    export ORACLE_WALLET_PASSWORD=YOUR_WALLET_PW
+    export APEX_WORKSPACE_ID=YOUR_WORKSPACE_ID
+    export APEX_SCHEMA=YOUR_SCHEMA
+    export APEX_WORKSPACE_NAME=YOUR_WORKSPACE
+
+    apex-mcp --transport streamable-http --host 127.0.0.1 --port 8000
+    ```
+
+    The server binds to `http://127.0.0.1:8000/mcp`. Leave this terminal running while your Python script executes.
+
+    You can verify the server is up with a quick curl:
+
+    ```bash
+    curl -s http://127.0.0.1:8000/mcp
+    ```
+
+    <Warning>
+      By default, apex-mcp binds to `127.0.0.1` (loopback only). Do not expose the HTTP server on `0.0.0.0` without a reverse proxy and authentication layer — the server has no built-in auth.
+    </Warning>
+  </Step>
+
+  <Step title="Install the OpenAI Agents SDK">
+    In a separate terminal, install the SDK:
+
+    ```bash
+    pip install openai-agents
+    ```
+  </Step>
+
+  <Step title="Connect with MCPServerStreamableHttp">
+    Use `MCPServerStreamableHttp` as an async context manager. The agent receives all 116 apex-mcp tools automatically when the context opens:
+
+    ```python
+    import asyncio
+    from agents import Agent, Runner
+    from agents.mcp import MCPServerStreamableHttp
+
+    async def main():
+        # apex-mcp must already be running on port 8000
+        async with MCPServerStreamableHttp(url="http://127.0.0.1:8000/mcp") as apex:
+            agent = Agent(
+                name="APEX Developer",
+                instructions=(
+                    "You are an Oracle APEX developer. Use the apex-mcp tools "
+                    "to build and modify APEX applications. Always call apex_connect "
+                    "before any database operation."
+                ),
+                mcp_servers=[apex],
+            )
+            result = await Runner.run(
+                agent,
+                "Connect to the database and list all APEX applications."
+            )
+            print(result.final_output)
+
+    asyncio.run(main())
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Multi-step build example
+
+For more complex workflows, use `Runner` incrementally across multiple prompts. Each call continues in the same agent context with the MCP connection held open:
+
+```python
+import asyncio
+from agents import Agent, Runner
+from agents.mcp import MCPServerStreamableHttp
+
+async def build_crud_app():
+    async with MCPServerStreamableHttp(url="http://127.0.0.1:8000/mcp") as apex:
+        agent = Agent(
+            name="APEX Builder",
+            instructions="Build Oracle APEX applications using apex-mcp tools.",
+            mcp_servers=[apex],
+        )
+        runner = Runner()
+
+        # Step 1: verify connection
+        await runner.run(agent, "Connect to Oracle and verify connection status.")
+
+        # Step 2: create the application
+        await runner.run(agent, "Create a new APEX app with ID 300, name 'HR Portal'.")
+
+        # Step 3: generate CRUD pages
+        await runner.run(agent, "Generate a CRUD page for the EMPLOYEES table.")
+
+        # Step 4: finalize
+        result = await runner.run(agent, "Finalize the application.")
+        print(result.final_output)
+
+asyncio.run(build_crud_app())
+```
+
+---
+
+## ChatGPT Desktop (stdio)
+
+ChatGPT Desktop (macOS/Windows) added MCP support in late 2024 using stdio — no HTTP server required. The configuration format is similar to Claude Desktop.
+
+<Note>
+  ChatGPT Desktop MCP support is still evolving. Check the [OpenAI documentation](https://platform.openai.com/docs) for the latest status and config schema.
+</Note>
+
+| OS | Config path |
+|---|---|
+| macOS | `~/Library/Application Support/ChatGPT/mcp_config.json` |
+| Windows | `%APPDATA%\ChatGPT\mcp_config.json` |
+
+```json
+{
+  "mcpServers": {
+    "apex-mcp": {
+      "command": "python",
+      "args": ["-m", "apex_mcp"],
+      "cwd": "/path/to/apex-mcp",
+      "env": {
+        "ORACLE_DB_USER": "YOUR_SCHEMA",
+        "ORACLE_DB_PASS": "YOUR_PASSWORD",
+        "ORACLE_DSN": "YOUR_DSN",
+        "ORACLE_WALLET_DIR": "/path/to/wallet",
+        "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+        "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+        "APEX_SCHEMA": "YOUR_SCHEMA",
+        "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Known limitations
+
+<Warning>
+  apex-mcp's `ImportSession` is a **singleton** — only one `apex_create_app → apex_finalize_app` sequence can be active at a time. Running multiple concurrent agent instances against the same HTTP server will cause session conflicts.
+</Warning>
+
+| Limitation | Details |
+|---|---|
+| HTTP required | The OpenAI Agents SDK does not support stdio; always use `--transport streamable-http` |
+| Single import session | Only one active app creation sequence per server process; run separate instances on different ports for parallel workflows |
+| No streaming tool output | Results are returned as complete JSON; very large outputs (e.g. full app exports) may be truncated by the SDK |
+| No auth layer | The HTTP server has no built-in authentication — keep it bound to `127.0.0.1` for local use |
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `ConnectionRefusedError` | Start `apex-mcp --transport streamable-http` before running your Python script |
+| `404 Not Found` on `/` | The default path is `/mcp`; use `http://127.0.0.1:8000/mcp` |
+| Tool list is empty | The HTTP handshake may have failed; check the server terminal for error output |
+| `ORA-` errors in tool response | Oracle database errors — verify credentials and wallet path |
+| Agent gets confused between tools | Provide explicit step-by-step instructions and remind the agent to call `apex_connect` first |

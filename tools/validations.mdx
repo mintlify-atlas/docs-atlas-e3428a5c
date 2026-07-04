@@ -1,0 +1,393 @@
+---
+title: "Item Validations and Computations Reference"
+sidebarTitle: "Validations"
+description: "Reference for apex-mcp validation and computation tools: add server-side item validations (NOT_NULL, REGEX, SQL, PL/SQL) and automatic value computations."
+---
+
+Server-side validations in Oracle APEX run on page submit, before any page processing takes place. When a validation fails, APEX stops execution, displays the error message inline next to the failing field (and in the notification area), and does not execute any page processes. This makes validations the correct place to enforce data integrity rules — not inside the DML process itself. apex-mcp provides two tools in this space: `apex_add_item_validation` to attach rules to individual page items, and `apex_add_item_computation` to derive or pre-populate item values at specific points in the page lifecycle.
+
+---
+
+## apex_add_item_validation
+
+Add a validation rule to a page item. Validations created by this tool run at `INLINE_WITH_FIELD_AND_NOTIFICATION` display location, meaning errors appear both beside the field and in the page-level notification banner.
+
+<Tabs>
+  <Tab title="NOT_NULL">
+    ```python
+    apex_add_item_validation(
+        page_id=10,
+        item_name="P10_FIRST_NAME",
+        validation_name="First Name Required",
+        validation_type="not_null",
+        error_message="First Name is required.",
+        sequence=10,
+    )
+    ```
+  </Tab>
+  <Tab title="REGEX">
+    ```python
+    apex_add_item_validation(
+        page_id=10,
+        item_name="P10_EMAIL",
+        validation_name="Email Format",
+        validation_type="regex",
+        validation_expression=r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$",
+        error_message="Please enter a valid email address.",
+        sequence=20,
+    )
+    ```
+  </Tab>
+  <Tab title="PL/SQL Expression">
+    ```python
+    apex_add_item_validation(
+        page_id=10,
+        item_name="P10_SALARY",
+        validation_name="Salary Range",
+        validation_type="plsql_expression",
+        validation_expression=":P10_SALARY > 0 AND :P10_SALARY <= 1000000",
+        error_message="Salary must be between 1 and 1,000,000.",
+        sequence=30,
+    )
+    ```
+  </Tab>
+  <Tab title="PL/SQL Function">
+    ```python
+    apex_add_item_validation(
+        page_id=10,
+        item_name="P10_USERNAME",
+        validation_name="Username Available",
+        validation_type="plsql_function",
+        validation_expression="""
+    declare
+      v_count number;
+    begin
+      select count(*) into v_count
+        from app_users
+       where upper(username) = upper(:P10_USERNAME)
+         and user_id != nvl(:P10_USER_ID, -1);
+      if v_count > 0 then
+        return 'This username is already taken. Please choose another.';
+      end if;
+      return null;
+    end;
+    """,
+        sequence=40,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Parameters
+
+<ParamField path="page_id" type="int" required>
+  Page ID containing the item to validate.
+</ParamField>
+
+<ParamField path="item_name" type="string" required>
+  The item to validate, e.g. `"P10_EMAIL"`. Automatically prefixed with `P{page_id}_` if the prefix is missing.
+</ParamField>
+
+<ParamField path="validation_name" type="string" required>
+  Display name for this validation rule, shown in the App Builder and in error messages. Use a descriptive name like `"Email Required"` or `"Salary Range Check"`.
+</ParamField>
+
+<ParamField path="validation_type" type="string" default="not_null">
+  Type of validation. Accepted values and their APEX internal mapping:
+
+  | Friendly name | APEX type | Description |
+  |--------------|-----------|-------------|
+  | `not_null` | `ITEM_NOT_NULL` | Item must not be empty. No `validation_expression` needed. |
+  | `max_length` | `MAX_LENGTH` | Item value must not exceed N characters. Set N in `validation_expression`. |
+  | `min_length` | `MIN_LENGTH` | Item must have at least N characters. Set N in `validation_expression`. |
+  | `regex` | `REGULAR_EXPRESSION` | Item must match the regex pattern in `validation_expression`. |
+  | `plsql_expression` | `PLSQL_EXPRESSION` | A PL/SQL boolean expression (referencing items via `:P{n}_ITEM` bind vars) that must evaluate to `TRUE`. |
+  | `plsql_function` | `PLSQL_FUNCTION_RETURNING_ERROR_TEXT` | A PL/SQL function body that returns `NULL` when valid or an error message string when invalid. |
+  | `item_not_null_or_zero` | `ITEM_NOT_NULL_OR_ZERO` | Item must not be null or zero. Useful for numeric required fields. |
+</ParamField>
+
+<ParamField path="validation_expression" type="string">
+  The rule expression whose meaning depends on `validation_type`:
+
+  | `validation_type` | What to put here |
+  |------------------|-----------------|
+  | `not_null` | *(not used — item name is implicit)* |
+  | `max_length` | Maximum number of characters as a string, e.g. `"100"` |
+  | `min_length` | Minimum number of characters as a string, e.g. `"8"` |
+  | `regex` | Regular expression pattern, e.g. `"^[0-9]+$"` |
+  | `plsql_expression` | Boolean PL/SQL expression, e.g. `":P10_AGE > 0 AND :P10_AGE < 120"` |
+  | `plsql_function` | Full PL/SQL anonymous function body returning `NULL` or an error string |
+  | `item_not_null_or_zero` | *(not used — item name is implicit)* |
+</ParamField>
+
+<ParamField path="error_message" type="string">
+  Message displayed to the user when the validation fails. Auto-generated from the item name and type if omitted — but providing an explicit, user-friendly message is strongly recommended.
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">
+  Execution order. Validations run in ascending sequence order. Lower numbers run first.
+</ParamField>
+
+<ParamField path="condition_item" type="string">
+  Optional item name: only run this validation when the specified item is not null. Useful for conditional fields that are only required in certain states (e.g. only validate `P10_MANAGER_ID` when `P10_DEPT_TYPE = 'MANAGED'`).
+</ParamField>
+
+### Return Value
+
+```json
+{
+  "status": "ok",
+  "validation_id": 88888,
+  "validation_name": "Email Format",
+  "validation_type": "REGULAR_EXPRESSION",
+  "item_name": "P10_EMAIL",
+  "page_id": 10,
+  "error_message": "Please enter a valid email address.",
+  "message": "Validation 'Email Format' added to item 'P10_EMAIL' on page 10."
+}
+```
+
+---
+
+## apex_add_item_computation
+
+Add a computation to derive or pre-populate a page item's value at a specified point in the page lifecycle. Computations fire automatically — no user interaction is required. Common uses: pre-populate a form field from the database when the page loads, copy the current user's name from a session variable, or derive a calculated value after submit.
+
+<Tabs>
+  <Tab title="Static Value">
+    ```python
+    apex_add_item_computation(
+        page_id=10,
+        item_name="P10_STATUS",
+        computation_type="static_value",
+        computation_expression="ACTIVE",
+        computation_point="BEFORE_HEADER",
+        sequence=10,
+    )
+    ```
+  </Tab>
+  <Tab title="SQL Query">
+    ```python
+    apex_add_item_computation(
+        page_id=10,
+        item_name="P10_FULL_NAME",
+        computation_type="query",
+        computation_expression="""
+    SELECT first_name || ' ' || last_name
+      FROM employees
+     WHERE emp_id = :P10_EMP_ID
+    """,
+        computation_point="BEFORE_HEADER",
+        sequence=20,
+        condition_item="P10_EMP_ID",   # only compute when editing an existing record
+    )
+    ```
+  </Tab>
+  <Tab title="PL/SQL Expression">
+    ```python
+    apex_add_item_computation(
+        page_id=10,
+        item_name="P10_CREATED_BY",
+        computation_type="plsql_expression",
+        computation_expression=":APP_USER",
+        computation_point="BEFORE_HEADER",
+        sequence=10,
+        condition_item="P10_EMP_ID",   # only set on new records (EMP_ID is null)
+    )
+    ```
+  </Tab>
+  <Tab title="Copy from Item">
+    ```python
+    apex_add_item_computation(
+        page_id=10,
+        item_name="P10_CURRENT_USER",
+        computation_type="item_value",
+        computation_expression="APP_USER",   # source application item
+        computation_point="BEFORE_HEADER",
+        sequence=10,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Parameters
+
+<ParamField path="page_id" type="int" required>Page ID.</ParamField>
+
+<ParamField path="item_name" type="string" required>
+  The item whose value will be set, e.g. `"P10_FULL_NAME"`. Automatically prefixed with `P{page_id}_` if the prefix is missing.
+</ParamField>
+
+<ParamField path="computation_type" type="string" default="static_value">
+  How the value is derived. Accepted values and their APEX internal mapping:
+
+  | Friendly name | APEX type | Description |
+  |--------------|-----------|-------------|
+  | `static_value` | `STATIC_ASSIGNMENT` | A literal fixed string |
+  | `plsql_expression` | `PLSQL_EXPRESSION` | A PL/SQL expression evaluated at runtime (e.g. `":APP_USER"`) |
+  | `plsql_function` | `PLSQL_FUNCTION_BODY` | A PL/SQL function body that returns the value |
+  | `query` | `QUERY` | A SQL `SELECT` returning a single value |
+  | `item_value` | `ITEM_VALUE` | Copy the value from another item (name in `computation_expression`) |
+  | `sequence` | `SEQUENCE` | Get the next value from a DB sequence (sequence name in `computation_expression`) |
+</ParamField>
+
+<ParamField path="computation_expression" type="string">
+  The value, expression, SQL, or source item name — interpreted according to `computation_type`:
+
+  | `computation_type` | What to put here |
+  |-------------------|-----------------|
+  | `static_value` | The literal string to assign, e.g. `"ACTIVE"` |
+  | `plsql_expression` | PL/SQL expression, e.g. `":APP_USER || '@company.com'"` |
+  | `plsql_function` | Full PL/SQL function body returning the value |
+  | `query` | Single-row `SELECT` statement returning one column |
+  | `item_value` | Name of the source item, e.g. `"APP_USER_ROLE"` |
+  | `sequence` | DB sequence name, e.g. `"EMP_SEQ"` |
+</ParamField>
+
+<ParamField path="computation_point" type="string" default="BEFORE_HEADER">
+  When in the page lifecycle the computation runs:
+
+  | Value | When it fires |
+  |-------|---------------|
+  | `BEFORE_HEADER` | Before the page renders — use for initialization and pre-populating edit forms |
+  | `AFTER_SUBMIT` | After the user submits the page — use for post-processing derived fields |
+  | `BEFORE_BOX_BODY` | Before the page body region renders |
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">Execution order when multiple computations exist for the same item or page.</ParamField>
+
+<ParamField path="condition_item" type="string">
+  Optional item name: only execute this computation when the specified item is not null. This is the standard way to differentiate between "new record" (condition item is null, i.e. no PK yet) and "edit record" (condition item is not null) scenarios.
+</ParamField>
+
+### Return Value
+
+```json
+{
+  "status": "ok",
+  "computation_id": 99999,
+  "item_name": "P10_FULL_NAME",
+  "computation_type": "QUERY",
+  "computation_point": "BEFORE_HEADER",
+  "page_id": 10,
+  "message": "Computation added to item 'P10_FULL_NAME' on page 10 (point: BEFORE_HEADER)."
+}
+```
+
+---
+
+## Practical Examples
+
+### Required fields with format validation
+
+Add NOT_NULL and email-format validations to a contact form on page 10:
+
+```python
+# Required: email cannot be blank
+apex_add_item_validation(
+    page_id=10,
+    item_name="P10_EMAIL",
+    validation_name="Email Required",
+    validation_type="not_null",
+    error_message="Email address is required.",
+    sequence=10,
+)
+
+# Format: email must match RFC-5321-style pattern
+apex_add_item_validation(
+    page_id=10,
+    item_name="P10_EMAIL",
+    validation_name="Email Format",
+    validation_type="regex",
+    validation_expression=r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$",
+    error_message="Please enter a valid email address (e.g. user@example.com).",
+    sequence=20,
+)
+```
+
+### SQL computation to set a derived display field
+
+Pre-populate `P10_FULL_NAME` from the database when opening an existing employee record:
+
+```python
+apex_add_item_computation(
+    page_id=10,
+    item_name="P10_FULL_NAME",
+    computation_type="query",
+    computation_expression="""
+SELECT first_name || ' ' || last_name
+  FROM employees
+ WHERE emp_id = :P10_EMP_ID
+""",
+    computation_point="BEFORE_HEADER",
+    sequence=10,
+    condition_item="P10_EMP_ID",  # only when editing (EMP_ID is populated)
+)
+```
+
+### Cross-field validation with PL/SQL expression
+
+Ensure the end date is after the start date:
+
+```python
+apex_add_item_validation(
+    page_id=20,
+    item_name="P20_END_DATE",
+    validation_name="End Date After Start",
+    validation_type="plsql_expression",
+    validation_expression=":P20_END_DATE > :P20_START_DATE",
+    error_message="End Date must be after Start Date.",
+    sequence=10,
+    condition_item="P20_END_DATE",  # only validate when end date is provided
+)
+```
+
+### Uniqueness check with PL/SQL function
+
+Verify a username is not already in use (excluding the current record):
+
+```python
+apex_add_item_validation(
+    page_id=10,
+    item_name="P10_USERNAME",
+    validation_name="Username Unique",
+    validation_type="plsql_function",
+    validation_expression="""
+declare
+  v_count number;
+begin
+  select count(*) into v_count
+    from app_users
+   where upper(username) = upper(:P10_USERNAME)
+     and user_id != nvl(to_number(:P10_USER_ID), -1);
+
+  if v_count > 0 then
+    return 'This username is already in use. Please choose a different one.';
+  end if;
+  return null;
+end;
+""",
+    error_message="Username already exists.",
+    sequence=30,
+)
+```
+
+---
+
+## Notes on Validation Types
+
+<Note>
+  **`not_null` vs `is_required` on the item** — Setting `is_required=True` on `apex_add_item` adds a visual required indicator (\*) and applies the required field template, but does **not** add a server-side validation. You must call `apex_add_item_validation` with `validation_type="not_null"` separately if you want enforcement on submit.
+</Note>
+
+<Note>
+  **`plsql_function` returns the error message** — Unlike `plsql_expression` (which must return `TRUE`/`FALSE`), the `plsql_function` type returns `NULL` to signal success and a non-null string to signal failure. The returned string becomes the error message shown to the user, so you can generate dynamic, data-driven error messages.
+</Note>
+
+<Note>
+  **Bind variables in PL/SQL validations** — Reference page items using `:P{page_id}_ITEM_NAME` syntax inside `plsql_expression` and `plsql_function` bodies. Application items are referenced as `:APP_ITEM_NAME`. These are Oracle bind variables resolved by APEX at execution time.
+</Note>
+
+<Warning>
+  Validations run on **every page submit** unless you add a `condition_item`. If you have a page with multiple submit buttons (Save, Delete), ensure your validations have appropriate conditions so a Delete action is not blocked by a missing required field that is irrelevant for deletion.
+</Warning>

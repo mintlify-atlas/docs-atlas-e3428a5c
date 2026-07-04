@@ -1,0 +1,465 @@
+---
+title: "Shared Components: LOVs, Auth Schemes, Navigation"
+sidebarTitle: "Shared Components"
+description: "Reference for apex-mcp shared component tools: Lists of Values, authorization schemes, navigation menu items, application-level items and processes."
+---
+
+Shared components in Oracle APEX are reusable resources that span all pages of an application. Unlike page-level components (regions, items, buttons), shared components are defined once at the application level and referenced by name wherever they are needed. apex-mcp provides tools to create and inspect the most commonly used shared component types: **Lists of Values (LOVs)** for populating select lists, **authorization schemes** that control access to pages and components, **navigation menu items** for side-bar navigation, and **application items and processes** that store session context and run application-wide logic.
+
+<Note>
+  All `apex_add_*` shared component tools require an active import session. Call `apex_create_app` before using them. The `apex_list_*` tools (read-only inspection) work without an import session.
+</Note>
+
+---
+
+## Lists of Values (LOVs)
+
+A shared LOV defines the query or static set used to populate select lists, radio groups, checkbox groups, and other choice-based items. Defining it once and referencing it by name keeps select list definitions consistent and easy to update.
+
+### apex_add_lov
+
+Create a shared List of Values.
+
+<Tabs>
+  <Tab title="SQL (Dynamic)">
+    ```python
+    apex_add_lov(
+        lov_name="DEPARTMENTS",
+        lov_type="sql",
+        sql_query="SELECT dept_name d, dept_id r FROM hr_departments WHERE active = 'Y' ORDER BY 1",
+    )
+    ```
+  </Tab>
+  <Tab title="Static">
+    ```python
+    apex_add_lov(
+        lov_name="ACTIVE_FLAG",
+        lov_type="static",
+        static_values=[
+            {"display": "Active",   "return": "Y"},
+            {"display": "Inactive", "return": "N"},
+        ],
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<ParamField path="lov_name" type="string" required>
+  Unique name for this LOV (e.g. `"DEPARTMENTS"`, `"STATUS_LIST"`). Referenced by name in `apex_add_item(lov_name=...)`. Use names that describe the data, not the page — LOVs are shared across all pages.
+</ParamField>
+
+<ParamField path="lov_type" type="string" default="sql">
+  Type of LOV:
+
+  | Value | Description |
+  |-------|-------------|
+  | `sql` | Dynamic LOV from a SQL query executed at runtime |
+  | `static` | Fixed list of display/return value pairs defined at design time |
+</ParamField>
+
+<ParamField path="sql_query" type="string">
+  SQL query for `lov_type="sql"`. Must return exactly **two columns**: the first is the display value shown to the user, the second is the return value stored in the item.
+
+  ```sql
+  SELECT department_name d, department_id r
+    FROM departments
+   ORDER BY 1
+  ```
+
+  The column aliases `d` (display) and `r` (return) are conventional but any names work. Always include `ORDER BY` for consistent user experience.
+</ParamField>
+
+<ParamField path="static_values" type="array">
+  List of `{"display": "...", "return": "..."}` objects for `lov_type="static"`. Internally converted to a `UNION ALL` SQL expression. Use for small, fixed option sets such as status flags or yes/no choices.
+</ParamField>
+
+<ParamField path="return_column" type="string">Explicit return column name. Auto-detected from the SQL query when omitted.</ParamField>
+<ParamField path="display_column" type="string">Explicit display column name. Auto-detected from the SQL query when omitted.</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "lov_name": "DEPARTMENTS",
+  "lov_id": 33333,
+  "lov_type": "sql",
+  "message": "LOV 'DEPARTMENTS' created successfully."
+}
+```
+
+**Referencing the LOV from an item:**
+
+```python
+apex_add_item(
+    page_id=10,
+    region_name="Employee Form",
+    item_name="DEPT_ID",
+    item_type="select",
+    label="Department",
+    lov_name="DEPARTMENTS",      # references the LOV by name
+)
+```
+
+<Note>
+  SQL LOVs always query the database at runtime. Add a `WHERE active = 'Y'` or similar filter to exclude inactive records, and ensure the query is indexed for fast response.
+</Note>
+
+---
+
+### apex_list_lovs
+
+List all shared LOVs for an application.
+
+```python
+apex_list_lovs(app_id=100)
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+
+**Returns** — `{ "status": "ok", "data": [...], "count": N }`. Each element includes `lov_name`, `lov_type` (source type), `lov_query`, `created_on`, and `updated_on`.
+
+---
+
+## Authorization Schemes
+
+Authorization schemes are PL/SQL function bodies that return a BOOLEAN. APEX evaluates them to decide whether a user may access a page, region, item, or button. When the function returns `FALSE`, APEX renders the configured error message.
+
+### apex_add_auth_scheme
+
+Create an authorization scheme.
+
+```python
+# Role-based: restrict to administrators only
+apex_add_auth_scheme(
+    scheme_name="IS_ADMIN",
+    function_body="return apex_util.get_session_state('APP_ROLE') = 'ADMIN';",
+    error_message="This page is restricted to administrators.",
+    caching="BY_USER_BY_SESSION",
+)
+
+# Multi-role: allow managers and administrators
+apex_add_auth_scheme(
+    scheme_name="IS_MANAGER_OR_ABOVE",
+    function_body="return apex_util.get_session_state('APP_ROLE') IN ('ADMIN', 'MANAGER');",
+    error_message="Manager access required.",
+)
+```
+
+<ParamField path="scheme_name" type="string" required>
+  Unique name for the scheme. The `IS_` prefix convention (e.g. `IS_ADMIN`, `IS_MANAGER`, `IS_CLINIC_USER`) makes authorization references self-documenting when applied to pages and components.
+</ParamField>
+
+<ParamField path="function_body" type="string" required>
+  PL/SQL function body that **must return BOOLEAN**. Return `TRUE` to grant access, `FALSE` to deny it. Has access to:
+  - `apex_application.g_user` — current APEX username
+  - `apex_util.get_session_state('ITEM_NAME')` — read any application item
+  - Standard Oracle built-ins
+
+  ```plsql
+  return apex_util.get_session_state('APP_USER_ROLE') = 'ADMIN';
+  ```
+
+  Do **not** raise exceptions for unauthorized access — return `FALSE` instead.
+</ParamField>
+
+<ParamField path="error_message" type="string" default="Access denied.">
+  Message displayed to the user when access is denied.
+</ParamField>
+
+<ParamField path="caching" type="string" default="BY_USER_BY_SESSION">
+  Controls when APEX re-evaluates the scheme:
+
+  | Value | When re-evaluated |
+  |-------|-------------------|
+  | `BY_USER_BY_SESSION` | Once per user session (default) — best performance for role-based schemes |
+  | `BY_USER_BY_PAGE_VIEW` | On every page view |
+  | `NO_CACHING` | Always — use for schemes that depend on data that changes mid-session |
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "scheme_name": "IS_ADMIN",
+  "scheme_id": 44444,
+  "caching": "BY_USER_BY_SESSION",
+  "message": "Authorization scheme 'IS_ADMIN' created successfully."
+}
+```
+
+**Applying a scheme to a navigation item:**
+
+```python
+apex_add_nav_item(
+    item_name="Admin Panel",
+    target_page=99,
+    auth_scheme="IS_ADMIN",     # hides nav item for non-admins
+)
+```
+
+<Note>
+  Authorization schemes created with `apex_add_auth_scheme` use `NATIVE_FUNCTION_BODY` as the scheme type, which maps to "PL/SQL Function Body" in the App Builder UI. This is the most flexible type and covers virtually all role/permission patterns.
+</Note>
+
+---
+
+### apex_list_auth_schemes
+
+List all authorization schemes for an application.
+
+```python
+apex_list_auth_schemes(app_id=100)
+```
+
+<ParamField path="app_id" type="int" required>Application ID.</ParamField>
+
+**Returns** — `{ "status": "ok", "data": [...], "count": N }`. Each element includes `authorization_scheme_name`, `authorization_scheme_type`, `attribute_01` (the PL/SQL function body), `error_message`, and `caching`.
+
+---
+
+## Navigation
+
+The Navigation Menu is a shared list that APEX renders as the side-bar (or top-bar) navigation for Universal Theme applications. apex-mcp adds items to the default navigation list created by `apex_create_app`.
+
+### apex_add_nav_item
+
+Add an item to the navigation menu.
+
+```python
+# Top-level items
+apex_add_nav_item(item_name="Dashboard",   target_page=1,  icon="fa-home",       sequence=10)
+apex_add_nav_item(item_name="Employees",   target_page=10, icon="fa-users",      sequence=20)
+apex_add_nav_item(item_name="Reports",     target_page=30, icon="fa-bar-chart",  sequence=30)
+apex_add_nav_item(item_name="Admin Panel", target_page=99, icon="fa-shield",     sequence=40, auth_scheme="IS_ADMIN")
+
+# Sub-navigation under "Reports"
+apex_add_nav_item(item_name="Headcount",   target_page=31, icon="fa-table",      sequence=10, parent_item="Reports")
+apex_add_nav_item(item_name="Payroll",     target_page=32, icon="fa-file-text-o",sequence=20, parent_item="Reports")
+```
+
+<ParamField path="item_name" type="string" required>
+  Display text for the navigation item (e.g. `"Dashboard"`, `"Employees"`).
+</ParamField>
+
+<ParamField path="target_page" type="int" required>
+  Page ID to navigate to when the item is clicked. apex-mcp generates the standard APEX URL: `f?p=&APP_ID.:{target_page}:&APP_SESSION.::&DEBUG.:::`.
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">
+  Display order in the menu. Use multiples of 10 to allow future insertions. Items with the same `parent_item` are ordered relative to each other.
+</ParamField>
+
+<ParamField path="icon" type="string" default="fa-circle">
+  Font APEX icon class. Common choices:
+
+  | Class | Usage |
+  |-------|-------|
+  | `fa-home` | Home / Dashboard |
+  | `fa-users` | Users, People |
+  | `fa-table` | Data, Reports |
+  | `fa-cog` | Settings, Configuration |
+  | `fa-bar-chart` | Analytics, Charts |
+  | `fa-user` | Profile, Account |
+  | `fa-file-text-o` | Documents, Reports |
+  | `fa-shield` | Security, Admin |
+  | `fa-plus` | Add, New |
+  | `fa-search` | Search |
+</ParamField>
+
+<ParamField path="auth_scheme" type="string">
+  Authorization scheme name (from `apex_add_auth_scheme`) that controls visibility. Leave empty to show the item to all authenticated users.
+</ParamField>
+
+<ParamField path="parent_item" type="string">
+  Name of an existing navigation item to nest this item under. The parent item must already have been created before calling `apex_add_nav_item` with `parent_item`. Creates a two-level hierarchy in the side-bar.
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "item_name": "Admin Panel",
+  "nav_item_id": 55555,
+  "target_page": 99,
+  "sequence": 40,
+  "icon": "fa-shield",
+  "auth_scheme": "IS_ADMIN",
+  "parent_item": null,
+  "message": "Navigation item 'Admin Panel' -> page 99 created successfully."
+}
+```
+
+<Note>
+  Keep the top-level navigation to 7 ± 2 items for usability. Group related pages under a parent item rather than listing them all at the top level.
+</Note>
+
+---
+
+## Application-Level Components
+
+Application items and processes operate at the session level, not the page level. Use them to store user context (current role, clinic ID, preferences) and to run initialization logic once per session.
+
+### apex_add_app_item
+
+Create an application item — a session-level variable accessible on every page via `&APP_ITEM_NAME.` or `apex_util.get_session_state('APP_ITEM_NAME')`.
+
+```python
+apex_add_app_item(item_name="APP_USER_ROLE")
+apex_add_app_item(item_name="APP_CLINIC_ID")
+apex_add_app_item(item_name="APP_USERNAME")
+```
+
+<ParamField path="item_name" type="string" required>
+  Item name, stored in uppercase. Prefix with `APP_` to distinguish application items from page items (`P{n}_`). Examples: `APP_USER_ROLE`, `APP_CLINIC_ID`, `APP_THEME_PREFERENCE`.
+</ParamField>
+
+<ParamField path="protection" type="string" default="I">
+  Security protection level:
+
+  | Value | Meaning |
+  |-------|---------|
+  | `I` | Restricted — cannot be set via URL parameter (recommended for security-sensitive items) |
+  | `C` | Checksum required — can be set via URL with a valid checksum |
+
+  Always use `I` (Restricted) for items that hold user roles, IDs, or any security-sensitive data.
+</ParamField>
+
+<ParamField path="session_state_function" type="string">
+  Optional PL/SQL expression to initialize the item value when the session starts.
+</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "item_name": "APP_USER_ROLE",
+  "item_id": 66666,
+  "protection": "I",
+  "message": "Application item 'APP_USER_ROLE' created successfully."
+}
+```
+
+**Reading and writing application items at runtime:**
+
+```plsql
+-- Read (in PL/SQL)
+v_role := apex_util.get_session_state('APP_USER_ROLE');
+
+-- Write (in PL/SQL)
+apex_util.set_session_state('APP_USER_ROLE', 'ADMIN');
+```
+
+```javascript
+// Read (in JavaScript)
+var role = $v('APP_USER_ROLE');
+```
+
+---
+
+### apex_add_app_process
+
+Create an application process that runs at the application or session level, independent of any specific page.
+
+```python
+apex_add_app_process(
+    process_name="LOAD_USER_CONTEXT",
+    plsql_body="""
+begin
+  select user_role, clinic_id, display_name
+    into apex_util.set_session_state('APP_ROLE', :1),
+         apex_util.set_session_state('APP_CLINIC_ID', :2),
+         apex_util.set_session_state('APP_DISPLAY_NAME', :3)
+    from app_users
+   where upper(username) = upper(:APP_USER);
+exception
+  when no_data_found then null;
+end;
+""",
+    point="ON_NEW_INSTANCE",
+    sequence=10,
+)
+```
+
+<ParamField path="process_name" type="string" required>Display name for the process.</ParamField>
+
+<ParamField path="plsql_body" type="string" required>
+  PL/SQL anonymous block to execute. Has access to:
+  - `:APP_USER` — the authenticated APEX username
+  - `apex_util.set_session_state()` / `apex_util.get_session_state()` — read/write application items
+  - Standard Oracle PL/SQL built-ins
+
+  Always include an `EXCEPTION WHEN OTHERS` or `WHEN NO_DATA_FOUND` handler to prevent a failing process from breaking the user session.
+</ParamField>
+
+<ParamField path="point" type="string" default="ON_NEW_INSTANCE">
+  When to execute the process:
+
+  | Value | When it runs |
+  |-------|--------------|
+  | `ON_NEW_INSTANCE` | On every new session — ideal for loading user context into `APP_*` items |
+  | `ON_SUBMIT` | On every page submit across the application |
+  | `BEFORE_LOGIN` | Before the login page authenticates the user |
+  | `AFTER_LOGIN` | Immediately after successful login |
+</ParamField>
+
+<ParamField path="sequence" type="int" default="10">Execution order when multiple application processes exist.</ParamField>
+
+<ParamField path="condition_type" type="string">
+  Optional condition: `ITEM_IS_NULL` or `ITEM_IS_NOT_NULL`. Leave empty to always run.
+</ParamField>
+
+<ParamField path="condition_expr" type="string">Item name for the condition check.</ParamField>
+
+**Returns:**
+
+```json
+{
+  "status": "ok",
+  "process_name": "LOAD_USER_CONTEXT",
+  "process_id": 77777,
+  "point": "ON_NEW_INSTANCE",
+  "sequence": 10,
+  "condition_type": null,
+  "condition_expr": null,
+  "message": "Application process 'LOAD_USER_CONTEXT' created successfully."
+}
+```
+
+**Typical pattern — session initialization:**
+
+```python
+# 1. Create items to hold session data
+apex_add_app_item("APP_USER_ROLE")
+apex_add_app_item("APP_CLINIC_ID")
+
+# 2. Create a process to populate them on login
+apex_add_app_process(
+    process_name="LOAD_USER_CONTEXT",
+    plsql_body="""
+begin
+  select role_code, clinic_id
+    into :APP_USER_ROLE, :APP_CLINIC_ID
+    from app_users
+   where username = :APP_USER;
+exception when no_data_found then
+  :APP_USER_ROLE := 'VIEWER';
+  :APP_CLINIC_ID := null;
+end;
+""",
+    point="ON_NEW_INSTANCE",
+)
+
+# 3. Create an auth scheme that reads APP_USER_ROLE
+apex_add_auth_scheme(
+    scheme_name="IS_ADMIN",
+    function_body="return :APP_USER_ROLE = 'ADMIN';",
+)
+```
+
+<Note>
+  Application processes with `ON_NEW_INSTANCE` run once when a new session is created (i.e. when the user first visits the application or a new session token is issued). They do **not** re-run on subsequent page requests in the same session, making them efficient for loading session context.
+</Note>

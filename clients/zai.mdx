@@ -1,0 +1,160 @@
+---
+title: "Use apex-mcp Alongside ZAI Visual Companion"
+sidebarTitle: "ZAI"
+description: "Run apex-mcp alongside ZAI, a visual companion tool for Oracle APEX development, to get AI-powered code generation with live visual preview."
+---
+
+ZAI is not a standard MCP client — it is a visual AI companion that runs side-by-side with apex-mcp inside Claude Code (or any MCP-compatible client that supports multiple servers). apex-mcp handles the programmatic side: creating pages, adding regions and items, running SQL, and generating REST endpoints. ZAI handles the visual side: taking screenshots of the rendered APEX application, analyzing the UI layout, diagnosing rendering errors, and extracting data from charts and tables. Together they form a closed build-and-verify loop that would otherwise require a human to switch between the terminal and a browser.
+
+---
+
+## Role split
+
+| Capability | apex-mcp | ZAI |
+|---|---|---|
+| Create APEX pages | ✅ | ❌ |
+| Add regions, items, buttons | ✅ | ❌ |
+| Run SQL queries | ✅ | ❌ |
+| Generate REST endpoints | ✅ | ❌ |
+| See rendered UI screenshots | ❌ | ✅ |
+| Verify layout looks correct | ❌ | ✅ |
+| Diagnose rendering errors | ❌ | ✅ |
+| Extract text from screenshots | ❌ | ✅ |
+| Analyze data visualizations | ❌ | ✅ |
+
+There are no tool name conflicts between the two servers. apex-mcp tools follow the `apex_*` prefix pattern; ZAI tools use descriptive names like `analyze_image` and `ui_diff_check`. Claude and other AI clients automatically route each request to the correct server.
+
+---
+
+## Setup
+
+<Steps>
+  <Step title="Install apex-mcp">
+    Clone the repository and install it:
+
+    ```bash
+    git clone https://github.com/your-org/apex-mcp
+    cd apex-mcp
+    pip install -e .
+    ```
+  </Step>
+
+  <Step title="Install ZAI">
+    ZAI is available as an MCP server via npm. You can run it directly with `npx` (no global install needed) or install it permanently:
+
+    ```bash
+    # Run on demand (no install)
+    npx -y zai-mcp-server
+
+    # Or install globally
+    npm install -g zai-mcp-server
+    ```
+
+    Check the [ZAI documentation](https://zai.ai/docs) for authentication requirements and the latest setup instructions.
+  </Step>
+
+  <Step title="Configure both servers in .mcp.json">
+    Add both `apex-mcp` and `zai` as separate entries in your `.mcp.json`. Claude Code (and other stdio clients) will start both processes simultaneously:
+
+    ```json
+    {
+      "mcpServers": {
+        "apex-mcp": {
+          "command": "python",
+          "args": ["-m", "apex_mcp"],
+          "cwd": "/path/to/apex-mcp",
+          "env": {
+            "ORACLE_DB_USER": "YOUR_SCHEMA",
+            "ORACLE_DB_PASS": "YOUR_PASSWORD",
+            "ORACLE_DSN": "YOUR_DSN",
+            "ORACLE_WALLET_DIR": "/path/to/wallet",
+            "ORACLE_WALLET_PASSWORD": "YOUR_WALLET_PW",
+            "APEX_WORKSPACE_ID": "YOUR_WORKSPACE_ID",
+            "APEX_SCHEMA": "YOUR_SCHEMA",
+            "APEX_WORKSPACE_NAME": "YOUR_WORKSPACE"
+          }
+        },
+        "zai": {
+          "command": "npx",
+          "args": ["-y", "zai-mcp-server"]
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Verify both servers are connected">
+    Open Claude Code in the project directory and run:
+
+    ```
+    /mcp
+    ```
+
+    You should see both `apex-mcp` (116 tools) and `zai` listed with status `connected`.
+  </Step>
+</Steps>
+
+---
+
+## Recommended workflows
+
+### Workflow 1: Build and visually verify
+
+Use apex-mcp to construct the application programmatically, then hand off to ZAI for a visual sanity check before iterating:
+
+```
+1. [apex-mcp] Connect to Oracle and verify workspace access
+2. [apex-mcp] Create app ID 300 "HR Portal"
+3. [apex-mcp] Generate CRUD pages for EMPLOYEES and DEPARTMENTS
+4. [apex-mcp] Add a dashboard page with a JET bar chart (headcount by department)
+5. [apex-mcp] Finalize the application
+6. [ZAI]      Take a screenshot of the rendered app in the APEX browser
+7. [ZAI]      Analyze the screenshot — verify layout, check for rendering errors
+```
+
+### Workflow 2: Debug a visual issue
+
+When something looks wrong in the browser, use ZAI to identify the error and apex-mcp to fix it in the database:
+
+```
+1. [ZAI]      diagnose_error_screenshot — identify what's broken in the rendered page
+2. [apex-mcp] apex_get_page_details — inspect the page configuration
+3. [apex-mcp] apex_update_region or apex_update_item — apply the fix
+4. [ZAI]      analyze_image — confirm the fix looks correct after reload
+```
+
+### Workflow 3: Validate data visualizations
+
+Cross-reference what ZAI can see in a rendered chart against the underlying Oracle data:
+
+```
+1. [ZAI]      extract_text_from_screenshot — read values from a rendered JET chart
+2. [apex-mcp] apex_run_sql — query the underlying data in Oracle
+3. [ZAI]      analyze_data_visualization — deeper analysis of chart accuracy
+```
+
+---
+
+## Tool routing reference
+
+Because the two servers have non-overlapping tool name patterns, Claude routes requests automatically. You do not need to prefix prompts with `@apex-mcp` or `@zai` unless you want to be explicit.
+
+| Server | Tool name pattern | Example tools |
+|---|---|---|
+| apex-mcp | `apex_*` | `apex_add_page`, `apex_run_sql`, `apex_generate_crud` |
+| ZAI | descriptive names | `analyze_image`, `ui_diff_check`, `extract_text_from_screenshot` |
+
+<Note>
+  For the most complex multi-step build-and-verify prompts, Claude 3.5 Sonnet or 3.7 Sonnet is recommended — it handles the high volume of sequential tool calls across both servers more reliably than smaller models.
+</Note>
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| ZAI not listed in `/mcp` | Confirm `npx` is in your PATH; try running `npx -y zai-mcp-server` manually |
+| apex-mcp tools work but ZAI tools don't route | Check ZAI server logs for startup errors; ensure the npm package is current |
+| Both servers listed but screenshots fail | ZAI may require a browser or display session; check the ZAI documentation for environment requirements |
+| Session confusion between servers | Restart the MCP session (`/mcp restart` in Claude Code) to reset both server processes |
